@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/rayl-core", "crates/rayl"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+rayl-core = { path = "crates/rayl-core" }
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+time = { version = "0.3", features = ["formatting"] }
+mail-parser = "0.9"

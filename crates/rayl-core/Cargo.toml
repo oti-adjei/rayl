@@ -1,0 +1,14 @@
+[package]
+name = "rayl-core"
+description = "Direct access to the Apple Mail store: version detection, schema probing, message reading."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+time.workspace = true
+mail-parser.workspace = true

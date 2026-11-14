@@ -1,0 +1,25 @@
+# Rust build output
+/target
+**/*.rs.bk
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local scratch
+/tmp/
+*.log
