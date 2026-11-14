@@ -1,7 +1,8 @@
 # rayl as an MCP server
 
-`rayl serve` speaks the Model Context Protocol over stdio. It is **read-only**: nothing in it
-can send, delete, move or modify mail.
+`rayl serve` speaks the Model Context Protocol over stdio. It reads mail and creates drafts.
+**It cannot send**: there is no send path in the codebase, and nothing can delete or modify
+existing mail.
 
 ## Install
 
@@ -89,10 +90,44 @@ not an empty body. The distinction matters: one means "nothing was written", the
 No parameters. Returns mailboxes and labels with message and unread counts. Call it before
 guessing a mailbox name.
 
+### `draft_message`
+
+Saves a **new draft** in Mail's Drafts folder. Never sends.
+
+| parameter | type | meaning |
+|---|---|---|
+| `subject` | string | **required** |
+| `body` | string | **required**; plain text |
+| `to` | string[] | recipient addresses |
+| `cc` | string[] | cc addresses |
+
+At least one recipient is required. The draft appears in Mail for the user to review and
+send themselves.
+
+### `draft_reply`
+
+Saves a **reply draft** to an existing message. Never sends.
+
+| parameter | type | meaning |
+|---|---|---|
+| `id` | integer | **required**; from `search_mail` |
+| `body` | string | **required**; goes above the quoted original |
+| `reply_all` | bool | reply to everyone rather than only the sender |
+
+Mail itself constructs the reply, so threading headers (`In-Reply-To`, `References`) and the
+quoted original are Mail's work rather than ours — AppleScript cannot set those headers on a
+message we build, so letting Mail do it is what makes the reply thread correctly in other
+clients.
+
+A small number of messages have no RFC Message-ID recorded; Mail cannot locate those, and the
+tool says so and suggests `draft_message` instead.
+
 ### `mail_status`
 
-No parameters. Reports the active mode, how many messages are indexed, and how many have
-bodies available locally. Call it when a search returns surprisingly little, to tell
+No parameters. Reports which accounts are loaded in Mail, the active mode, how many messages
+are indexed, and how many have bodies available locally. The account list matters: mail for an
+address that is not listed is not on this machine at all, so an empty result for it means
+"not here" rather than "does not exist". Call it when a search returns surprisingly little, to tell
 "no such message" apart from "that part of the mailbox is not readable". When access is
 blocked it returns the specific remedy, including which application needs permission.
 
@@ -100,7 +135,9 @@ blocked it returns the specific remedy, including which application needs permis
 
 - **Does not search message bodies.** Metadata only. Full-text search needs the `indexed`
   mode, which is not built yet.
-- **Does not send, reply, draft, delete, flag or move anything.** Read-only by construction.
+- **Cannot send mail.** Drafting is supported; sending is not, and is not planned. There is no
+  SMTP client and no `send` command anywhere in the codebase.
+- **Does not delete, flag, move or modify existing mail.**
 - **Does not reach the network.** Everything comes from files already on the Mac.
 - **Does not cache.** `direct+live` reads Mail's own files per call and persists nothing. The
   envelope index is snapshotted to a temporary file per request and deleted immediately, so
@@ -138,6 +175,21 @@ Links stay navigable. The response says how many URLs were changed and how many 
 saved; `raw_urls` turns it off.
 
 ## Permissions
+
+Two separate grants are involved, and they are unrelated to each other.
+
+### Automation, for drafting
+
+`draft_message` and `draft_reply` drive Mail.app through Apple Events, which needs Automation
+access scoped to Mail — System Settings > Privacy & Security > Automation. macOS prompts once,
+on first use, naming whichever application is running the server. Mail.app must also be
+running, since Apple Events reach a running application only.
+
+This is the narrow, right-sized permission: it grants control of Mail and nothing else. Both
+draft tools report these conditions specifically rather than failing generically, so an agent
+knows to ask rather than retry.
+
+### Full Disk Access, for reading
 
 `~/Library/Mail` is protected by macOS privacy controls (TCC). macOS has no narrow "read my
 mail" permission — the directory sits in the catch-all protected set alongside Safari history
@@ -188,6 +240,11 @@ the body, which is not searched. Try the sender or a subject word instead.
 
 **`read_message` says the body is not available.** Mail has only the headers. Change that
 account's settings in Mail to keep full copies, then let it sync.
+
+**A draft tool says it cannot control Mail.** That is the Automation permission, not Full Disk
+Access — a different pane in System Settings. Grant it to the application running the server.
+
+**A draft tool says Mail is not running.** Open Mail. Reading does not need it; drafting does.
 
 **Dates look wrong by about 31 years.** Report it. The date epoch is detected at runtime
 rather than assumed, and a response that cannot confirm it says so — but a mailbox whose

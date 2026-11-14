@@ -12,6 +12,7 @@ pub mod keys;
 pub mod mailbox;
 pub mod mode;
 pub mod probe;
+pub mod script;
 pub mod search;
 pub mod store;
 pub mod urls;

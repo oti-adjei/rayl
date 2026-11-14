@@ -112,7 +112,23 @@ pub fn live_message_count(db: &Path) -> Result<i64> {
         .unwrap_or(0))
 }
 
+/// One message by the id search reports, so a caller holding an id need not re-search.
+pub fn hit_by_rowid(db: &Path, rowid: i64, now_unix: i64) -> Result<Option<SearchHit>> {
+    let query = SearchQuery { limit: 1, ..Default::default() };
+    let mut results = search_where(db, &query, now_unix, Some(rowid))?;
+    Ok(results.hits.pop())
+}
+
 pub fn search(db: &Path, query: &SearchQuery, now_unix: i64) -> Result<SearchResults> {
+    search_where(db, query, now_unix, None)
+}
+
+fn search_where(
+    db: &Path,
+    query: &SearchQuery,
+    now_unix: i64,
+    only_rowid: Option<i64>,
+) -> Result<SearchResults> {
     let conn = Connection::open(db)?;
 
     // Date filters are expressed in Unix seconds but stored in the index's own epoch, so the
@@ -130,7 +146,18 @@ pub fn search(db: &Path, query: &SearchQuery, now_unix: i64) -> Result<SearchRes
     let global_key = resolve(&conn, "message_global_data");
     let label_key = resolve(&conn, "labels");
 
-    let (predicates, params) = build_filters(query, epoch, label_key);
+    // Mailbox names must be resolved to ids before the query: the stored URLs are
+    // percent-encoded, so matching a displayed name like "Sent Mail" against the raw URL
+    // can never hit `Sent%20Mail`.
+    let mailbox_ids = match &query.mailbox {
+        Some(needle) => Some(crate::mailbox::resolve_filter(db, needle)?),
+        None => None,
+    };
+
+    let (mut predicates, params) = build_filters(query, epoch, label_key, mailbox_ids.as_deref());
+    if let Some(rowid) = only_rowid {
+        predicates.push(format!("m.ROWID = {rowid}"));
+    }
     let where_clause = predicates.join(" AND ");
 
     // Count distinct messages, not rows: the label subquery and the global-data join can
@@ -197,6 +224,7 @@ fn build_filters(
     query: &SearchQuery,
     epoch: Epoch,
     label_key: MessageKey,
+    mailbox_ids: Option<&[i64]>,
 ) -> (Vec<String>, Vec<Value>) {
     let mut predicates = vec!["m.deleted = 0".to_string()];
     let mut params: Vec<Value> = Vec::new();
@@ -218,17 +246,25 @@ fn build_filters(
             "(a.address LIKE ?{i} ESCAPE '\\' OR a.comment LIKE ?{i} ESCAPE '\\')"
         ));
     }
-    if let Some(mailbox) = &query.mailbox {
-        let i = next(&mut params, Value::Text(like_pattern(mailbox)));
-        // Match the primary mailbox *or* any label. Checking only the former silently
-        // returns nothing on Gmail, where every message's primary mailbox is "All Mail".
-        predicates.push(format!(
-            "(mb.url LIKE ?{i} ESCAPE '\\'
-              OR EXISTS (SELECT 1 FROM labels l
-                           JOIN mailboxes lm ON lm.ROWID = l.mailbox_id
-                          WHERE l.message_id = {label} AND lm.url LIKE ?{i} ESCAPE '\\'))",
-            label = label_key.column()
-        ));
+    if let Some(ids) = mailbox_ids {
+        if ids.is_empty() {
+            // The name matched no mailbox. Say "nothing" rather than "everything".
+            predicates.push("0 = 1".to_string());
+        } else {
+            // Match the primary mailbox *or* any label. Checking only the former silently
+            // returns nothing on Gmail, where every message's primary mailbox is All Mail.
+            let list = ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            predicates.push(format!(
+                "(m.mailbox IN ({list})
+                  OR EXISTS (SELECT 1 FROM labels l
+                              WHERE l.message_id = {label} AND l.mailbox_id IN ({list})))",
+                label = label_key.column()
+            ));
+        }
     }
     if query.unread_only {
         predicates.push("m.read = 0".to_string());
@@ -312,6 +348,22 @@ mod tests {
 
     fn query() -> SearchQuery {
         SearchQuery { limit: 50, ..Default::default() }
+    }
+
+    #[test]
+    fn finds_one_message_by_its_reported_id() {
+        let (_dir, db) = fixture();
+        let hit = hit_by_rowid(&db, 1, NOW).unwrap().expect("message 1 exists");
+        assert_eq!(hit.rowid, 1);
+        assert_eq!(hit.message_id_header.as_deref(), Some("<a@vendor.test>"));
+        assert_eq!(hit.subject, "Re: Invoice 100% due");
+        assert!(hit.mailboxes.iter().any(|m| m.ends_with("/INBOX")));
+    }
+
+    #[test]
+    fn an_unknown_id_is_none_rather_than_an_error() {
+        let (_dir, db) = fixture();
+        assert!(hit_by_rowid(&db, 9999, NOW).unwrap().is_none());
     }
 
     #[test]
@@ -448,6 +500,57 @@ mod tests {
 
         let results = search(&db, &q, NOW).unwrap();
         assert_eq!(results.hits.len(), 1, "one hit, not one per matching label");
+    }
+
+    #[test]
+    fn a_percent_encoded_mailbox_name_matches_the_name_shown_to_the_user() {
+        // Regression: filtering on the displayed name "Sent Mail" matched nothing, because
+        // the stored URL spells it "Sent%20Mail" and the predicate compared raw URLs.
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("Envelope Index");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE messages (ROWID INTEGER PRIMARY KEY, message_id INTEGER,
+                global_message_id INTEGER, sender INTEGER, subject_prefix TEXT,
+                subject INTEGER NOT NULL, date_sent INTEGER, mailbox INTEGER NOT NULL,
+                read INTEGER NOT NULL, flagged INTEGER NOT NULL, deleted INTEGER NOT NULL,
+                size INTEGER NOT NULL, conversation_id INTEGER NOT NULL);
+             CREATE TABLE subjects (ROWID INTEGER PRIMARY KEY, subject TEXT NOT NULL);
+             CREATE TABLE addresses (ROWID INTEGER PRIMARY KEY, address TEXT NOT NULL, comment TEXT NOT NULL);
+             CREATE TABLE mailboxes (ROWID INTEGER PRIMARY KEY, url TEXT NOT NULL,
+                total_count INTEGER NOT NULL, unread_count INTEGER NOT NULL);
+             CREATE TABLE message_global_data (ROWID INTEGER PRIMARY KEY, message_id INTEGER, message_id_header TEXT);
+             CREATE TABLE labels (message_id INTEGER, mailbox_id INTEGER);
+
+             INSERT INTO subjects (ROWID, subject) VALUES (1, 'Thanks');
+             INSERT INTO addresses (ROWID, address, comment) VALUES (1, 'me@x.test', '');
+             INSERT INTO mailboxes (ROWID, url, total_count, unread_count) VALUES
+                (1, 'imap://me%40gmail.com@imap.gmail.com/%5BGmail%5D/All%20Mail', 1, 0),
+                (2, 'imap://me%40gmail.com@imap.gmail.com/%5BGmail%5D/Sent%20Mail', 1, 0);
+             INSERT INTO messages VALUES (1, 9001, 7001, 1, NULL, 1, {d}, 1, 1, 0, 0, 10, 1);
+             INSERT INTO labels (message_id, mailbox_id) VALUES (9001, 1), (9001, 2);",
+            d = NOW - 60
+        ))
+        .unwrap();
+        drop(conn);
+
+        for needle in ["Sent Mail", "sent mail", "Sent", "[Gmail]/Sent Mail"] {
+            let mut q = query();
+            q.mailbox = Some(needle.into());
+            let results = search(&db, &q, NOW).unwrap();
+            assert_eq!(results.hits.len(), 1, "{needle:?} should match");
+        }
+    }
+
+    #[test]
+    fn an_unknown_mailbox_returns_nothing_rather_than_everything() {
+        let (_dir, db) = fixture();
+        let mut q = query();
+        q.mailbox = Some("NoSuchMailbox".into());
+
+        let results = search(&db, &q, NOW).unwrap();
+        assert!(results.hits.is_empty());
+        assert_eq!(results.total_matching, 0);
     }
 
     #[test]

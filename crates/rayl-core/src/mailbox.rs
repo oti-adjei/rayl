@@ -10,9 +10,12 @@ use crate::error::Result;
 
 #[derive(Debug, Clone)]
 pub struct MailboxInfo {
+    pub rowid: i64,
     pub url: String,
     /// Last path segment, percent-decoded. `None` when the URL has no usable segment.
     pub name: Option<String>,
+    /// The account this mailbox belongs to, as an email address where the URL carries one.
+    pub account: Option<String>,
     pub total: i64,
     pub unread: i64,
 }
@@ -28,20 +31,86 @@ impl MailboxInfo {
 pub fn list(db: &Path) -> Result<Vec<MailboxInfo>> {
     let conn = rusqlite::Connection::open(db)?;
     let mut stmt = conn.prepare(
-        "SELECT url, total_count, unread_count FROM mailboxes ORDER BY total_count DESC",
+        "SELECT ROWID, url, total_count, unread_count FROM mailboxes ORDER BY total_count DESC",
     )?;
     let rows = stmt
         .query_map([], |row| {
-            let url: String = row.get(0)?;
+            let url: String = row.get(1)?;
             Ok(MailboxInfo {
+                rowid: row.get(0)?,
                 name: short_name(&url),
+                account: account_of(&url),
                 url,
-                total: row.get(1)?,
-                unread: row.get(2)?,
+                total: row.get(2)?,
+                unread: row.get(3)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+/// Mailbox ROWIDs whose decoded name, decoded path or raw URL contains `needle`,
+/// case-insensitively.
+///
+/// Resolving here rather than in SQL is the point: mailbox URLs are percent-encoded, so a
+/// `LIKE '%Sent Mail%'` against the stored URL can never match `Sent%20Mail`. Matching the
+/// name the user was shown requires decoding first, which SQLite cannot do.
+pub fn resolve_filter(db: &Path, needle: &str) -> Result<Vec<i64>> {
+    let needle = needle.trim().to_lowercase();
+    let conn = rusqlite::Connection::open(db)?;
+
+    // Only ROWID and url: deliberately independent of the count columns, so resolving a
+    // mailbox name keeps working on a store whose schema differs.
+    let mut stmt = conn.prepare("SELECT ROWID, url FROM mailboxes")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(rows
+        .into_iter()
+        .filter(|(_, url)| {
+            let name_hit = short_name(url).is_some_and(|name| name.to_lowercase().contains(&needle));
+            // Also match deeper path segments, so "Gmail" finds "[Gmail]/Sent Mail".
+            let path_hit = percent_decode(url).to_lowercase().contains(&needle);
+            let raw_hit = url.to_lowercase().contains(&needle);
+            name_hit || path_hit || raw_hit
+        })
+        .map(|(rowid, _)| rowid)
+        .collect())
+}
+
+/// The accounts present, as email addresses, with how many mailboxes each has.
+///
+/// Nothing else reports whose mail is loaded, which makes "no results" ambiguous between
+/// "no such message" and "that account isn't in Mail at all".
+pub fn accounts(db: &Path) -> Result<Vec<(String, usize)>> {
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    for mailbox in list(db)? {
+        let account = mailbox.account.unwrap_or_else(|| "(local)".to_string());
+        match seen.iter_mut().find(|(name, _)| *name == account) {
+            Some((_, count)) => *count += 1,
+            None => seen.push((account, 1)),
+        }
+    }
+    seen.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    Ok(seen)
+}
+
+/// The account address from a mailbox URL, e.g.
+/// `imap://me%40gmail.com@imap.gmail.com/INBOX` -> `me@gmail.com`.
+///
+/// The userinfo holds a percent-encoded address, and a literal `@` separates it from the
+/// host, so the split is on the *last* `@` of the authority.
+pub fn account_of(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split('/').next()?;
+    let (userinfo, _host) = authority.rsplit_once('@')?;
+    if userinfo.is_empty() {
+        return None;
+    }
+    Some(percent_decode(userinfo))
 }
 
 /// The trailing path segment of a mailbox URL, decoded. `None` when the tail is the account
@@ -137,6 +206,21 @@ mod tests {
     }
 
     #[test]
+    fn extracts_the_account_address_from_a_mailbox_url() {
+        assert_eq!(
+            account_of("imap://me%40gmail.com@imap.gmail.com/INBOX"),
+            Some("me@gmail.com".into())
+        );
+        assert_eq!(
+            account_of("imap://george.heavenson%40gmail.com@imap.gmail.com/%5BGmail%5D/Sent%20Mail"),
+            Some("george.heavenson@gmail.com".into())
+        );
+        // Local stores carry no account.
+        assert_eq!(account_of("file:///Users/x/Library/Mail/V10"), None);
+        assert_eq!(account_of("not a url"), None);
+    }
+
+    #[test]
     fn lists_mailboxes_busiest_first() {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("Envelope Index");
@@ -158,5 +242,66 @@ mod tests {
         assert_eq!(boxes[0].total, 989);
         assert_eq!(boxes[1].display_name(), "INBOX");
         assert_eq!(boxes[2].display_name(), "Drafts");
+    }
+
+    /// A Gmail-shaped fixture, including the encoded space that caused the bug.
+    fn gmail_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("Envelope Index");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE mailboxes (ROWID INTEGER PRIMARY KEY, url TEXT NOT NULL,
+                total_count INTEGER NOT NULL, unread_count INTEGER NOT NULL);
+             INSERT INTO mailboxes (ROWID, url, total_count, unread_count) VALUES
+                (1, 'imap://me%40gmail.com@imap.gmail.com/INBOX', 483, 120),
+                (2, 'imap://me%40gmail.com@imap.gmail.com/%5BGmail%5D/Sent%20Mail', 13, 0),
+                (3, 'imap://me%40gmail.com@imap.gmail.com/%5BGmail%5D/All%20Mail', 989, 695);",
+        )
+        .unwrap();
+        drop(conn);
+        (dir, db)
+    }
+
+    #[test]
+    fn the_name_list_mailboxes_shows_is_a_name_search_mail_accepts() {
+        // The reported bug: list_mailboxes displayed "Sent Mail", but filtering on that
+        // string matched nothing because the stored URL spells it "Sent%20Mail".
+        let (_dir, db) = gmail_fixture();
+
+        let shown = list(&db).unwrap();
+        let sent = shown
+            .iter()
+            .find(|m| m.display_name() == "Sent Mail")
+            .expect("listed as 'Sent Mail'");
+
+        let resolved = resolve_filter(&db, "Sent Mail").unwrap();
+        assert!(
+            resolved.contains(&sent.rowid),
+            "the displayed name must resolve to the mailbox it names"
+        );
+    }
+
+    #[test]
+    fn mailbox_filter_is_case_insensitive_and_matches_partials() {
+        let (_dir, db) = gmail_fixture();
+        assert_eq!(resolve_filter(&db, "inbox").unwrap(), vec![1]);
+        assert_eq!(resolve_filter(&db, "INBOX").unwrap(), vec![1]);
+        assert_eq!(resolve_filter(&db, "sent").unwrap(), vec![2]);
+        // A deeper path segment still matches, decoded.
+        let gmail = resolve_filter(&db, "[Gmail]").unwrap();
+        assert!(gmail.contains(&2) && gmail.contains(&3), "got {gmail:?}");
+    }
+
+    #[test]
+    fn an_unknown_mailbox_resolves_to_nothing() {
+        let (_dir, db) = gmail_fixture();
+        assert!(resolve_filter(&db, "Nonexistent").unwrap().is_empty());
+    }
+
+    #[test]
+    fn groups_mailboxes_by_account() {
+        let (_dir, db) = gmail_fixture();
+        let accounts = accounts(&db).unwrap();
+        assert_eq!(accounts, vec![("me@gmail.com".to_string(), 3)]);
     }
 }

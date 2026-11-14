@@ -31,17 +31,24 @@ out to be the most quota-proof mail API available.
 
 ## What you get
 
-Four read-only tools over MCP:
+Six tools over MCP:
 
 | tool | what it does |
 |---|---|
 | `search_mail` | find mail by subject, sender, mailbox, flags or date |
 | `read_message` | read one message's headers and body |
 | `list_mailboxes` | the mailboxes and labels you can filter on |
-| `mail_status` | what's readable, what isn't, and why |
+| `mail_status` | which accounts are loaded, what's readable, what isn't, and why |
+| `draft_message` | save a new draft in Mail's Drafts |
+| `draft_reply` | save a threaded reply draft to a message |
 
-**Read-only by construction.** Nothing here can send, delete, move or modify mail. There is
-no code path that writes.
+**It cannot send mail.** There is no send path, no SMTP client, and no `send` anywhere in the
+codebase — drafts land in Mail's Drafts folder and a person reviews and sends them. Nothing
+can delete or modify existing mail either.
+
+That is deliberate rather than incidental. This project exists because an agent was too
+enthusiastic with an API on my behalf; the same caution applies to its ability to speak as
+me. A bad draft is something you delete. A bad sent email is not.
 
 ## Quick start
 
@@ -113,7 +120,9 @@ you an email doesn't exist:
 - **Not every body is on your Mac.** IMAP accounts set not to keep full copies store headers
   only. On my own store that's 370 of 989 messages — 37%, not an edge case. `read_message`
   says so explicitly instead of returning an empty body.
-- **No sending, replying or drafting.** Planned, via Mail.app.
+- **No sending.** Drafting works; sending is deliberately absent and not planned.
+- **Drafting needs a second permission.** Automation access to Mail.app, prompted once, and
+  Mail must be running. Reading needs neither.
 - **macOS only**, and verified against Apple Mail V10. `rayl doctor` and `rayl schema` will
   tell you if your store differs.
 
@@ -205,6 +214,8 @@ your newest message and flags the one case that's unresolvable in principle.
 | `rayl doctor` | which modes this machine can serve, and how to fix the others |
 | `rayl search` | metadata search from the terminal |
 | `rayl read <id>` | one message body; `--coverage` for how many bodies exist |
+| `rayl draft` | save a new draft; `--to`, `--subject`, `--body` |
+| `rayl draft-reply <id>` | save a threaded reply draft |
 | `rayl schema` | the envelope index's shape — tables, columns, row counts |
 | `rayl verify` | resolves what the schema can't say: date epoch, foreign keys, enum values |
 
@@ -219,10 +230,12 @@ those two are what I'll ask for.
 Roadmap:
 
 1. ~~`direct+live`: search, read, MCP server~~ — done
-2. `indexed` strategy — full-text search over bodies
-3. `script` source — the modes needing no Full Disk Access
-4. Drafting via Mail.app
-5. HTTP transport, for reaching the Mac from elsewhere
+2. ~~Drafting via Mail.app~~ — done
+3. Body search — the clearest remaining gap; an agent can find mail by sender and subject
+   but not by what the message says
+4. Attachment metadata, and a `to`/`cc` filter
+5. `script` source — the modes needing no Full Disk Access
+6. HTTP transport, for reaching the Mac from elsewhere
 
 ## Development
 

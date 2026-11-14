@@ -67,6 +67,30 @@ pub struct SearchParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DraftParams {
+    /// Recipient email addresses.
+    #[serde(default)]
+    pub to: Vec<String>,
+    /// Cc email addresses.
+    #[serde(default)]
+    pub cc: Vec<String>,
+    pub subject: String,
+    /// Plain text body.
+    pub body: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ReplyParams {
+    /// Id of the message to reply to, as reported by search_mail.
+    pub id: i64,
+    /// Plain text to put above the quoted original.
+    pub body: String,
+    /// Reply to everyone rather than only the sender.
+    #[serde(default)]
+    pub reply_all: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ReadParams {
     /// Message id, as reported by search_mail.
     pub id: i64,
@@ -137,6 +161,41 @@ impl RailServer {
         match self.run_list_mailboxes() {
             Ok(text) => text,
             Err(err) => format!("Listing mailboxes failed: {err:#}"),
+        }
+    }
+
+    /// Saves a new draft in Mail. Never sends.
+    #[tool(
+        name = "draft_message",
+        description = "Save a NEW DRAFT in Apple Mail's Drafts folder. The draft is never                        sent - the user opens Mail, reviews it, and sends it themselves.                        There is no tool here that can send mail. Requires Mail.app to be                        running, and macOS will ask the user once for permission to control                        Mail."
+    )]
+    pub async fn draft_message(&self, params: Parameters<DraftParams>) -> String {
+        let params = params.0;
+        let draft = rayl_core::script::Draft {
+            to: params.to,
+            cc: params.cc,
+            subject: params.subject,
+            body: params.body,
+        };
+        match rayl_core::script::draft_message(&draft) {
+            Ok(outcome) => format!(
+                "{}\n\nNot sent. It is waiting in Mail's Drafts for the user to review and                  send. Tell them it is there.",
+                outcome.detail
+            ),
+            Err(err) => draft_error(&err),
+        }
+    }
+
+    /// Saves a reply draft in Mail. Never sends.
+    #[tool(
+        name = "draft_reply",
+        description = "Save a REPLY DRAFT to a message, by the id search_mail reported. Mail                        builds the reply so it threads correctly and the original is quoted.                        The draft is never sent - the user reviews and sends it. Requires                        Mail.app to be running."
+    )]
+    pub async fn draft_reply(&self, params: Parameters<ReplyParams>) -> String {
+        let params = params.0;
+        match self.run_draft_reply(params).await {
+            Ok(text) => text,
+            Err(err) => format!("Reply draft failed: {err:#}"),
         }
     }
 
@@ -346,8 +405,13 @@ impl RailServer {
 
         let mut out = String::from("Mailboxes (use the name with search_mail's mailbox):\n\n");
         for mailbox in &boxes {
+            let account = mailbox
+                .account
+                .as_deref()
+                .map(|a| format!("  [{a}]"))
+                .unwrap_or_default();
             out.push_str(&format!(
-                "- {} — {} messages, {} unread\n",
+                "- {} — {} messages, {} unread{account}\n",
                 mailbox.display_name(),
                 mailbox.total,
                 mailbox.unread
@@ -360,6 +424,48 @@ impl RailServer {
         Ok(out)
     }
 
+    async fn run_draft_reply(&self, params: ReplyParams) -> Result<String> {
+        let snapshot = self.snapshot()?;
+        let now = Self::now();
+
+        let Some(hit) = rayl_core::search::hit_by_rowid(&snapshot.db, params.id, now)? else {
+            return Ok(format!(
+                "No message with id {}. Ids come from search_mail.\n",
+                params.id
+            ));
+        };
+
+        // Mail needs the RFC Message-ID to find the original; a minority of messages have
+        // none recorded, and those cannot be replied to this way.
+        let Some(message_id) = hit.message_id_header.as_deref() else {
+            return Ok(format!(
+                "Message {} has no RFC Message-ID recorded, so Mail cannot locate it to \
+                 build a threaded reply. Use draft_message to write a new message instead.\n",
+                params.id
+            ));
+        };
+
+        // Prefer a label mailbox: on Gmail the primary mailbox is All Mail, which Mail.app
+        // does not expose under that name.
+        let mailbox = hit
+            .mailboxes
+            .iter()
+            .chain(std::iter::once(&hit.mailbox_url))
+            .filter_map(|url| rayl_core::mailbox::short_name(url))
+            .next()
+            .unwrap_or_else(|| "INBOX".to_string());
+
+        match rayl_core::script::draft_reply(message_id, &mailbox, &params.body, params.reply_all)
+        {
+            Ok(outcome) => Ok(format!(
+                "{}\n\nReplying to: {}\nNot sent. It is waiting in Mail's Drafts for the \
+                 user to review and send.\n",
+                outcome.detail, hit.subject
+            )),
+            Err(err) => Ok(draft_error(&err)),
+        }
+    }
+
     async fn run_status(&self) -> Result<String> {
         let snapshot = self.snapshot()?;
         let index = self.emlx_index().await?;
@@ -367,7 +473,22 @@ impl RailServer {
 
         let total = rayl_core::search::live_message_count(&snapshot.db).unwrap_or(0);
 
+        let accounts = rayl_core::mailbox::accounts(&snapshot.db).unwrap_or_default();
+
         let mut out = String::new();
+        if accounts.is_empty() {
+            out.push_str("Accounts: none found\n");
+        } else {
+            out.push_str("Accounts loaded in Mail:\n");
+            for (address, mailboxes) in &accounts {
+                out.push_str(&format!("  {address} ({mailboxes} mailboxes)\n"));
+            }
+            out.push_str(
+                "Only these accounts are searchable. Mail not in one of them is not on this \
+                 machine at all, so an empty result for such an address means 'not here', \
+                 not 'does not exist'.\n\n",
+            );
+        }
         out.push_str(&format!(
             "Mode: direct+live (reading Mail's own files; nothing cached)\n\
              Store: Apple Mail V{}\n\
@@ -397,12 +518,30 @@ impl ServerHandler for RailServer {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("rayl", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-            "Read-only access to local Apple Mail. Call list_mailboxes before guessing a \
-             mailbox name, and mail_status when a result looks surprisingly empty. \
-             search_mail matches subjects and senders only - it does NOT search message \
-             bodies, so do not conclude from an empty result that no such mail exists. \
-             Nothing here can send, delete or modify mail.",
+            "Local Apple Mail: read and draft. Call list_mailboxes before guessing a \
+             mailbox name, and mail_status when a result looks surprisingly empty - it also \
+             reports which accounts are present, so an empty result for an address not \
+             listed means that mail is not on this machine at all. search_mail matches \
+             subjects and senders only - it does NOT search message bodies, so never \
+             conclude from an empty result that no such mail exists. draft_message and \
+             draft_reply save to Mail's Drafts for the user to review and send: NOTHING \
+             HERE CAN SEND MAIL, and nothing can delete or modify existing mail. After \
+             creating a draft, tell the user it is waiting in Drafts.",
         )
+    }
+}
+
+/// Draft failures are nearly always one of three fixable conditions, and each needs the user
+/// to do something. Saying which keeps an agent from retrying pointlessly.
+fn draft_error(err: &rayl_core::Error) -> String {
+    match err {
+        rayl_core::Error::AutomationDenied => "Cannot control Mail.app: macOS has not granted              this application Automation access to Mail. The user must allow it in System              Settings > Privacy & Security > Automation, under whichever app is running this              server. It cannot be requested from here, and no retry will succeed until they              do. This is a different permission from the one used to read mail."
+            .to_string(),
+        rayl_core::Error::MailNotRunning => "Mail.app is not running. Drafts are created              through Mail itself, so ask the user to open Mail and try again. Reading mail              does not need this; drafting does."
+            .to_string(),
+        rayl_core::Error::DraftTargetNotFound => "Mail could not find the original message to              reply to. It may have been moved or deleted since the search. Use draft_message              to write a new message instead."
+            .to_string(),
+        other => format!("Draft failed: {other}"),
     }
 }
 

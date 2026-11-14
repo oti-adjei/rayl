@@ -1,4 +1,5 @@
 mod doctor;
+mod draft;
 mod read;
 mod schema;
 mod search;
@@ -67,6 +68,29 @@ enum Command {
         #[arg(long)]
         raw_urls: bool,
     },
+    /// Save a new draft in Mail. Never sends.
+    Draft {
+        /// Recipient address. Repeatable.
+        #[arg(long = "to", required = true)]
+        to: Vec<String>,
+        /// Cc address. Repeatable.
+        #[arg(long = "cc")]
+        cc: Vec<String>,
+        #[arg(long)]
+        subject: String,
+        #[arg(long)]
+        body: String,
+    },
+    /// Save a reply draft to a message. Never sends.
+    DraftReply {
+        /// Message id, as shown by `rayl search`.
+        id: i64,
+        #[arg(long)]
+        body: String,
+        /// Reply to everyone, not only the sender.
+        #[arg(long)]
+        reply_all: bool,
+    },
     /// Resolve what the schema shape leaves open: date epoch, foreign keys, enum values.
     /// Reports counts only, never message content.
     Verify,
@@ -91,6 +115,8 @@ fn main() -> anyhow::Result<()> {
         Command::Read { id, max_bytes, coverage, raw_urls } => {
             read::run(id, max_bytes, coverage, raw_urls)
         }
+        Command::Draft { to, cc, subject, body } => draft::new_message(to, cc, subject, body),
+        Command::DraftReply { id, body, reply_all } => draft::reply(id, body, reply_all),
         Command::Verify => verify::run(),
         Command::Serve => serve::run(),
     }

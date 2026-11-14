@@ -33,6 +33,20 @@ pub enum Error {
 
     #[error("querying the envelope index failed")]
     Sqlite(#[from] rusqlite::Error),
+
+    /// Automation access to Mail.app has not been granted. Like Full Disk Access, this is
+    /// the user's to grant and cannot be requested from here.
+    #[error("not authorised to control Mail.app")]
+    AutomationDenied,
+
+    #[error("Mail.app is not running, so Apple Events cannot reach it")]
+    MailNotRunning,
+
+    #[error("no message matching that Message-ID was found in Mail")]
+    DraftTargetNotFound,
+
+    #[error("{0}")]
+    Draft(String),
 }
 
 impl Error {
