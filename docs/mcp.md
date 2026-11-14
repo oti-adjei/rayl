@@ -48,26 +48,43 @@ Use an absolute path: the client does not inherit your shell's `PATH`.
 
 ### `search_mail`
 
-Searches **metadata only**: subject, sender, mailbox, flags, date. Message bodies are not
-searched in this mode, so a message whose subject omits a term will not match even when its
-body contains it. Every response repeats this, because an agent that does not know what it
-cannot see will report that an email does not exist.
-
 | parameter | type | meaning |
 |---|---|---|
 | `text` | string | matched against the subject, including any `Re:`/`Fwd:` prefix |
 | `from` | string | matched against the sender's address **or** display name |
+| `to` | string | matched against any recipient, To or Cc |
+| `body` | string | matched against message body text — see below |
 | `mailbox` | string | mailbox or label name; see `list_mailboxes` |
 | `unread_only` | bool | |
 | `flagged_only` | bool | |
+| `has_attachment` | bool | |
 | `days` | integer | only messages from the last N days |
 | `limit` | integer | default 20, capped at 100 |
 
 All parameters are optional; with none, it returns the most recent messages. Substring
 matching, case-insensitive for ASCII. `%` and `_` are literal, not wildcards.
 
-Each hit carries an `id` for `read_message`, plus sender, subject, date, flags and the
-mailboxes the message is filed under.
+Each hit carries an `id` for `read_message`, plus sender, subject, date, flags, attachment
+filenames, thread size, and the mailboxes the message is filed under.
+
+#### Body search
+
+Passing `body` searches message text, which matters because the useful detail often isn't in
+the subject — an application acknowledgement titled "Your application" may carry the deadline,
+the portal link or the rejection reason only in its body.
+
+There is no index behind this. Candidates are narrowed by the other filters, then their local
+message files are opened and scanned, which keeps the "nothing persisted" guarantee intact.
+Two consequences worth knowing:
+
+- **It is linear**, so combine it with `from`, `mailbox` or `days` on a large mailbox. A scan
+  budget bounds it, and the response says when that budget was hit.
+- **It covers only downloaded bodies.** Messages Mail holds as headers-only are reported as
+  *unsearchable* rather than as non-matching, with a count. A match in those cannot be ruled
+  out, and the response says so.
+
+Without `body`, the response states that bodies were not searched — because an agent that
+doesn't know what it couldn't see will report that an email does not exist.
 
 ### `read_message`
 
@@ -89,6 +106,25 @@ not an empty body. The distinction matters: one means "nothing was written", the
 
 No parameters. Returns mailboxes and labels with message and unread counts. Call it before
 guessing a mailbox name.
+
+### `save_attachment`
+
+Lists a message's attachments, or writes them to files.
+
+| parameter | type | meaning |
+|---|---|---|
+| `id` | integer | **required**; from `search_mail` |
+| `which` | string | a zero-based position, or part of a filename; all if omitted |
+| `directory` | string | where to write; defaults to `~/Downloads` |
+| `list_only` | bool | report names, types and sizes without writing |
+
+Attachment filenames come from the message, so they are attacker-controlled: each is reduced
+to a safe single path component before use, and a name like `../../.ssh/authorized_keys`
+becomes `authorized_keys`. An existing file is never overwritten — `report.pdf` becomes
+`report-2.pdf`.
+
+Only works on messages whose bodies are downloaded locally; a headers-only message has no
+attachment data on the machine.
 
 ### `draft_message`
 
@@ -133,8 +169,9 @@ blocked it returns the specific remedy, including which application needs permis
 
 ## What it does not do
 
-- **Does not search message bodies.** Metadata only. Full-text search needs the `indexed`
-  mode, which is not built yet.
+- **Body search has no index.** It opens message files per query, which is fine for a few
+  thousand messages and bounded by a scan budget beyond that. Nothing is persisted.
+- **Body search cannot see undownloaded bodies**, and reports how many it skipped.
 - **Cannot send mail.** Drafting is supported; sending is not, and is not planned. There is no
   SMTP client and no `send` command anywhere in the codebase.
 - **Does not delete, flag, move or modify existing mail.**

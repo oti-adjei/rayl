@@ -105,6 +105,15 @@ fn parse_emlx_name(name: &str) -> Option<(i64, bool)> {
     stem.parse().ok().map(|id| (id, partial))
 }
 
+/// One attachment's bytes, ready to be written out.
+#[derive(Debug, Clone)]
+pub struct ExtractedAttachment {
+    /// Filename as the message declares it, already made safe to use as a leaf name.
+    pub filename: String,
+    pub content_type: Option<String>,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParsedMessage {
     pub from: Option<String>,
@@ -130,6 +139,68 @@ impl ParsedMessage {
     /// The body an agent should read, with the source noted.
     pub fn body(&self) -> Option<&str> {
         self.text.as_deref().or(self.html_text.as_deref())
+    }
+}
+
+/// Lists and extracts attachments from a message file.
+///
+/// `which` selects by zero-based position, or by filename when it parses as neither. Returns
+/// every attachment when `which` is `None`.
+pub fn extract_attachments(
+    file: &MessageFile,
+    which: Option<&str>,
+) -> Result<Vec<ExtractedAttachment>> {
+    let bytes = fs::read(&file.path).map_err(|e| Error::from_io(&file.path, e))?;
+    let rfc822 = strip_length_prefix(&bytes);
+    let Some(message) = mail_parser::MessageParser::default().parse(rfc822) else {
+        return Ok(Vec::new());
+    };
+
+    let all: Vec<ExtractedAttachment> = message
+        .attachments()
+        .enumerate()
+        .map(|(position, part)| ExtractedAttachment {
+            filename: safe_filename(part.attachment_name(), position),
+            content_type: part.content_type().map(|ct| match ct.subtype() {
+                Some(sub) => format!("{}/{}", ct.ctype(), sub),
+                None => ct.ctype().to_string(),
+            }),
+            bytes: part.contents().to_vec(),
+        })
+        .collect();
+
+    let Some(which) = which else { return Ok(all) };
+
+    if let Ok(position) = which.parse::<usize>() {
+        return Ok(all.into_iter().skip(position).take(1).collect());
+    }
+    let wanted = which.to_lowercase();
+    Ok(all
+        .into_iter()
+        .filter(|a| a.filename.to_lowercase().contains(&wanted))
+        .collect())
+}
+
+/// Reduces a declared filename to something safe to use as a single path component.
+///
+/// Attachment names come from the message, so they are attacker-controlled: a name of
+/// `../../.ssh/authorized_keys` must not be allowed to escape the directory it is written to.
+fn safe_filename(declared: Option<&str>, position: usize) -> String {
+    let fallback = format!("attachment-{}", position + 1);
+    let Some(name) = declared else { return fallback };
+
+    // Keep only the last component, then strip anything that could traverse or confuse.
+    let leaf = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let cleaned: String = leaf
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != '\0')
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').trim();
+
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        fallback
+    } else {
+        cleaned.chars().take(200).collect()
     }
 }
 
@@ -517,7 +588,7 @@ mod tests {
 
     #[test]
     fn compaction_shrinks_a_tracking_heavy_body_and_reports_it() {
-        let raw = b"Subject: Jobs\r\n\r\n                    View roles\r\n                    https://www.linkedin.com/comm/company/acme/jobs?lipi=urn%3Ali&midToken=AQF&trk=eml-x&otpToken=MzhlMjIxZjE4NGVjNjk3NDMyYzA4Nzk0OGJkZTgzZGNj\r\n";
+        let raw = b"Subject: Jobs\r\n\r\nView roles\r\nhttps://www.linkedin.com/comm/company/acme/jobs?lipi=urn%3Ali&midToken=AQF&trk=eml-x&otpToken=MzhlMjIxZjE4NGVjNjk3NDMyYzA4Nzk0OGJkZTgzZGNj\r\n";
         let parsed = parse_rfc822_with(raw, false, true);
 
         let body = parsed.body().expect("body present");
@@ -541,6 +612,61 @@ mod tests {
         let parsed = parse_rfc822(raw, true);
         assert!(parsed.partial);
         assert_eq!(parsed.body(), None);
+    }
+
+    #[test]
+    fn attachment_filenames_cannot_escape_their_directory() {
+        assert_eq!(safe_filename(Some("report.pdf"), 0), "report.pdf");
+        assert_eq!(
+            safe_filename(Some("../../.ssh/authorized_keys"), 0),
+            "authorized_keys"
+        );
+        assert_eq!(safe_filename(Some("/etc/passwd"), 0), "passwd");
+        assert_eq!(safe_filename(Some("..\\..\\win.ini"), 0), "win.ini");
+        assert_eq!(safe_filename(Some(".."), 0), "attachment-1");
+        assert_eq!(safe_filename(Some("   "), 3), "attachment-4");
+        assert_eq!(safe_filename(None, 1), "attachment-2");
+        // A leading dot would hide the file; strip it but keep the name.
+        assert_eq!(safe_filename(Some(".hidden.pdf"), 0), "hidden.pdf");
+    }
+
+    #[test]
+    fn long_filenames_are_bounded() {
+        let long = format!("{}.pdf", "a".repeat(500));
+        assert_eq!(safe_filename(Some(&long), 0).chars().count(), 200);
+    }
+
+    #[test]
+    fn extracts_an_attachment_by_position_and_by_name() {
+        let raw = b"Subject: With files\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n--B\r\nContent-Type: text/plain\r\n\r\nsee attached\r\n--B\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"offer.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nSGVsbG8gUERG\r\n--B--\r\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("1.emlx");
+        let mut file_bytes = format!("{}\n", raw.len()).into_bytes();
+        file_bytes.extend_from_slice(raw);
+        fs::write(&path, &file_bytes).unwrap();
+        let file = MessageFile { path, partial: false };
+
+        let all = extract_attachments(&file, None).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].filename, "offer.pdf");
+        assert_eq!(all[0].bytes, b"Hello PDF");
+        assert_eq!(all[0].content_type.as_deref(), Some("application/pdf"));
+
+        assert_eq!(extract_attachments(&file, Some("0")).unwrap().len(), 1);
+        assert_eq!(extract_attachments(&file, Some("offer")).unwrap().len(), 1);
+        assert!(extract_attachments(&file, Some("nope")).unwrap().is_empty());
+        assert!(extract_attachments(&file, Some("7")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_message_with_no_attachments_yields_none() {
+        let raw = b"Subject: Plain\r\n\r\njust text\r\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("2.emlx");
+        fs::write(&path, raw).unwrap();
+        let file = MessageFile { path, partial: false };
+        assert!(extract_attachments(&file, None).unwrap().is_empty());
     }
 
     #[test]

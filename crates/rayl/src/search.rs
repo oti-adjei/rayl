@@ -7,15 +7,20 @@ use rayl_core::mailbox::short_name;
 use rayl_core::search::{SearchHit, SearchQuery, SearchResults};
 
 #[allow(clippy::too_many_arguments)]
-pub fn run(
-    text: Option<String>,
-    from: Option<String>,
-    mailbox: Option<String>,
-    unread: bool,
-    flagged: bool,
-    days: Option<i64>,
-    limit: usize,
-) -> Result<()> {
+pub struct Filters {
+    pub text: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub body: Option<String>,
+    pub mailbox: Option<String>,
+    pub unread: bool,
+    pub flagged: bool,
+    pub has_attachment: bool,
+    pub days: Option<i64>,
+    pub limit: usize,
+}
+
+pub fn run(filters: Filters) -> Result<()> {
     let store = MailStore::discover().context("locating the mail store")?;
     let snapshot = store
         .snapshot_envelope_index()
@@ -26,17 +31,27 @@ pub fn run(
         .unwrap_or(0);
 
     let query = SearchQuery {
-        text,
-        from,
-        mailbox,
-        unread_only: unread,
-        flagged_only: flagged,
-        since: days.map(|d| now - d * 86_400),
+        text: filters.text,
+        from: filters.from,
+        to: filters.to,
+        body: filters.body,
+        mailbox: filters.mailbox,
+        unread_only: filters.unread,
+        flagged_only: filters.flagged,
+        has_attachment: filters.has_attachment,
+        since: filters.days.map(|d| now - d * 86_400),
         until: None,
-        limit,
+        limit: filters.limit,
     };
 
-    let results = rayl_core::search::search(&snapshot.db, &query, now).context("searching")?;
+    // Body search opens message files, so it needs the file index as well as the database.
+    let results = if query.body.is_some() {
+        let index = rayl_core::emlx::EmlxIndex::build(&store).context("indexing message files")?;
+        rayl_core::search::search_bodies(&snapshot.db, &index, &query, now)
+            .context("searching bodies")?
+    } else {
+        rayl_core::search::search(&snapshot.db, &query, now).context("searching")?
+    };
     render(&results);
     Ok(())
 }
@@ -63,7 +78,15 @@ fn render(results: &SearchResults) {
             results.epoch.name()
         );
     }
-    println!("Bodies are not searched in this mode; subjects and senders only.");
+    match &results.body_scan {
+        Some(scan) => println!(
+            "Searched {} bodies; {} unavailable{}.",
+            scan.searched,
+            scan.unavailable,
+            if scan.capped { " (candidate set capped)" } else { "" }
+        ),
+        None => println!("Bodies were not searched; pass --body to search message text."),
+    }
 }
 
 fn print_hit(hit: &SearchHit) {
@@ -105,6 +128,12 @@ fn print_hit(hit: &SearchHit) {
         }
     } else {
         notes.push(folders.join(", "));
+    }
+    if hit.thread_size > 1 {
+        notes.push(format!("thread of {}", hit.thread_size));
+    }
+    if !hit.attachments.is_empty() {
+        notes.push(format!("attached: {}", hit.attachments.join(", ")));
     }
     println!("    {}", notes.join("  ·  "));
     println!();

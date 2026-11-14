@@ -1,3 +1,4 @@
+mod attachment;
 mod doctor;
 mod draft;
 mod read;
@@ -33,14 +34,20 @@ enum Command {
         #[arg(long)]
         tables: bool,
     },
-    /// Search message metadata: subject, sender, mailbox, flags, date. Bodies are not
-    /// searched in this mode.
+    /// Search mail by subject, sender, recipient, mailbox, flags, date or body text.
+    /// Body search opens local message files and only covers downloaded bodies.
     Search {
         /// Match against the subject.
         text: Option<String>,
         /// Match against the sender address or display name.
         #[arg(long)]
         from: Option<String>,
+        /// Match against any recipient (To or Cc).
+        #[arg(long)]
+        to: Option<String>,
+        /// Match against message body text. Reads local message files.
+        #[arg(long)]
+        body: Option<String>,
         /// Match against the mailbox name.
         #[arg(long)]
         mailbox: Option<String>,
@@ -48,6 +55,9 @@ enum Command {
         unread: bool,
         #[arg(long)]
         flagged: bool,
+        /// Only messages with attachments.
+        #[arg(long)]
+        has_attachment: bool,
         /// Only messages from the last N days.
         #[arg(long)]
         days: Option<i64>,
@@ -67,6 +77,20 @@ enum Command {
         /// Keep tracking parameters in URLs instead of stripping them.
         #[arg(long)]
         raw_urls: bool,
+    },
+    /// List or save a message's attachments.
+    Attachment {
+        /// Message id, as shown by `rayl search`.
+        id: i64,
+        /// Which attachment: a zero-based position, or part of its filename. All if omitted.
+        #[arg(long)]
+        which: Option<String>,
+        /// Directory to write into. Defaults to ~/Downloads.
+        #[arg(long)]
+        dir: Option<String>,
+        /// List them without writing anything.
+        #[arg(long)]
+        list: bool,
     },
     /// Save a new draft in Mail. Never sends.
     Draft {
@@ -109,14 +133,35 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Schema { all, table, tables } => schema::run(all, table, tables),
-        Command::Search { text, from, mailbox, unread, flagged, days, limit } => {
-            search::run(text, from, mailbox, unread, flagged, days, limit)
-        }
+        Command::Search {
+            text,
+            from,
+            to,
+            body,
+            mailbox,
+            unread,
+            flagged,
+            has_attachment,
+            days,
+            limit,
+        } => search::run(search::Filters {
+            text,
+            from,
+            to,
+            body,
+            mailbox,
+            unread,
+            flagged,
+            has_attachment,
+            days,
+            limit,
+        }),
         Command::Read { id, max_bytes, coverage, raw_urls } => {
             read::run(id, max_bytes, coverage, raw_urls)
         }
         Command::Draft { to, cc, subject, body } => draft::new_message(to, cc, subject, body),
         Command::DraftReply { id, body, reply_all } => draft::reply(id, body, reply_all),
+        Command::Attachment { id, which, dir, list } => attachment::run(id, which, dir, list),
         Command::Verify => verify::run(),
         Command::Serve => serve::run(),
     }

@@ -49,6 +49,15 @@ pub struct SearchParams {
     /// Match against the sender's email address or display name.
     #[serde(default)]
     pub from: Option<String>,
+    /// Match against any recipient, To or Cc. Useful when several of the user's addresses
+    /// route into one mailbox.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Match against message BODY text. Slower than the other filters because it opens
+    /// message files, and only covers messages whose bodies are downloaded locally; the
+    /// response reports how many it could search.
+    #[serde(default)]
+    pub body: Option<String>,
     /// Match against a mailbox or label name, e.g. "INBOX". Use list_mailboxes to see them.
     #[serde(default)]
     pub mailbox: Option<String>,
@@ -58,12 +67,30 @@ pub struct SearchParams {
     /// Only flagged messages.
     #[serde(default)]
     pub flagged_only: bool,
+    /// Only messages with attachments.
+    #[serde(default)]
+    pub has_attachment: bool,
     /// Only messages from the last N days.
     #[serde(default)]
     pub days: Option<i64>,
     /// Maximum hits to return. Default 20, capped at 100.
     #[serde(default)]
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AttachmentParams {
+    /// Message id, as reported by search_mail.
+    pub id: i64,
+    /// Which attachment: a zero-based position, or part of its filename. All if omitted.
+    #[serde(default)]
+    pub which: Option<String>,
+    /// Directory to save into. Defaults to the user's Downloads folder.
+    #[serde(default)]
+    pub directory: Option<String>,
+    /// List the attachments without writing anything.
+    #[serde(default)]
+    pub list_only: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -161,6 +188,25 @@ impl RailServer {
         match self.run_list_mailboxes() {
             Ok(text) => text,
             Err(err) => format!("Listing mailboxes failed: {err:#}"),
+        }
+    }
+
+    /// Lists or saves a message's attachments.
+    #[tool(
+        name = "save_attachment",
+        description = "List a message's attachments, or write them to files so they can be \
+                       read. Pass list_only to see names, types and sizes without writing. \
+                       Files go to the user's Downloads folder unless a directory is given, \
+                       and an existing file is never overwritten. Only works on messages \
+                       whose bodies are downloaded locally."
+    )]
+    pub async fn save_attachment(&self, params: Parameters<AttachmentParams>) -> String {
+        if let Err(message) = self.store() {
+            return message;
+        }
+        match self.run_attachment(params.0).await {
+            Ok(text) => text,
+            Err(err) => format!("Attachment failed: {err:#}"),
         }
     }
 
@@ -273,23 +319,40 @@ impl RailServer {
         let query = SearchQuery {
             text: params.text,
             from: params.from,
+            to: params.to,
+            body: params.body,
             mailbox: params.mailbox,
             unread_only: params.unread_only,
             flagged_only: params.flagged_only,
+            has_attachment: params.has_attachment,
             since: params.days.map(|d| now - d * 86_400),
             until: None,
             limit,
         };
 
-        let results = rayl_core::search::search(&snapshot.db, &query, now)?;
+        // A body filter needs the message files, which the database alone cannot provide.
+        let results = if query.body.is_some() {
+            let index = self.emlx_index().await?;
+            rayl_core::search::search_bodies(&snapshot.db, &index, &query, now)?
+        } else {
+            rayl_core::search::search(&snapshot.db, &query, now)?
+        };
 
         let mut out = String::new();
         if results.hits.is_empty() {
             out.push_str("No messages matched.\n\n");
-            out.push_str(
-                "Note: only subjects and senders were searched, not message bodies. \
-                 A message may exist whose body mentions the term.\n",
-            );
+            match &results.body_scan {
+                Some(scan) => out.push_str(&format!(
+                    "Message bodies WERE searched: {} were read, and {} could not be \
+                     because Mail has not downloaded them. Those {} are unsearchable, not \
+                     known to be non-matching.\n",
+                    scan.searched, scan.unavailable, scan.unavailable
+                )),
+                None => out.push_str(
+                    "Note: only subjects and senders were searched, not message bodies. \
+                     Pass `body` to search message text.\n",
+                ),
+            }
             return Ok(out);
         }
 
@@ -303,7 +366,30 @@ impl RailServer {
             results.total_matching,
             if results.total_matching == 1 { "" } else { "s" }
         ));
-        out.push_str("Searched metadata only; message bodies were not searched.\n");
+        match &results.body_scan {
+            Some(scan) => {
+                out.push_str(&format!(
+                    "Bodies searched: {}. Unsearchable (body not downloaded): {}.\n",
+                    scan.searched, scan.unavailable
+                ));
+                if scan.unavailable > 0 {
+                    out.push_str(
+                        "Those are not misses - their text is not on this machine, so a \
+                         match there cannot be ruled out.\n",
+                    );
+                }
+                if scan.capped {
+                    out.push_str(
+                        "The candidate set hit the scan budget, so this may be incomplete; \
+                         narrow with another filter.\n",
+                    );
+                }
+            }
+            None => out.push_str(
+                "Searched metadata only; message bodies were not searched. Pass `body` to \
+                 search message text.\n",
+            ),
+        }
         if !results.epoch_confident {
             out.push_str(
                 "Warning: the date format in this mail store could not be confirmed, \
@@ -421,6 +507,71 @@ impl RailServer {
             "\nOn Gmail accounts most messages are filed under All Mail and also appear \
              under one or more labels; filtering by a label name works.\n",
         );
+        Ok(out)
+    }
+
+    async fn run_attachment(&self, params: AttachmentParams) -> Result<String> {
+        let index = self.emlx_index().await?;
+
+        let Some(file) = index.get(params.id) else {
+            return Ok(format!(
+                "No message file for id {}. Ids come from search_mail.\n",
+                params.id
+            ));
+        };
+        if file.partial {
+            return Ok(format!(
+                "Message {} has only its headers downloaded, so its attachments are not on \
+                 this machine. Mail would need to fetch the full message first.\n",
+                params.id
+            ));
+        }
+
+        let found = rayl_core::emlx::extract_attachments(file, params.which.as_deref())?;
+        if found.is_empty() {
+            return Ok(match &params.which {
+                Some(which) => format!("No attachment matching {which:?} on message {}.\n", params.id),
+                None => format!("Message {} has no attachments.\n", params.id),
+            });
+        }
+
+        if params.list_only {
+            let mut out = format!("{} attachment(s) on message {}:\n", found.len(), params.id);
+            for (position, attachment) in found.iter().enumerate() {
+                out.push_str(&format!(
+                    "  {position}  {}  {}  {} bytes\n",
+                    attachment.filename,
+                    attachment.content_type.as_deref().unwrap_or("unknown type"),
+                    attachment.bytes.len()
+                ));
+            }
+            out.push_str("Call again without list_only to write them to files.\n");
+            return Ok(out);
+        }
+
+        let target = match &params.directory {
+            Some(dir) => std::path::PathBuf::from(dir),
+            None => {
+                let home = std::env::var_os("HOME").context("HOME is not set")?;
+                std::path::PathBuf::from(home).join("Downloads")
+            }
+        };
+        std::fs::create_dir_all(&target)
+            .with_context(|| format!("creating {}", target.display()))?;
+
+        let mut out = String::new();
+        for attachment in &found {
+            // Filenames are already reduced to a safe leaf, so this cannot escape `target`.
+            let path = crate::attachment::unique_path(&target, &attachment.filename);
+            std::fs::write(&path, &attachment.bytes)
+                .with_context(|| format!("writing {}", path.display()))?;
+            out.push_str(&format!(
+                "Saved {} ({} bytes)\n",
+                path.display(),
+                attachment.bytes.len()
+            ));
+        }
+        out.push_str("These are now files on the user's disk; read them if you need their contents.\n");
         Ok(out)
     }
 
@@ -582,8 +733,16 @@ fn format_hit(hit: &SearchHit) -> String {
         format!(" [{}]", flags.join(", "))
     };
 
+    let mut extra = String::new();
+    if hit.thread_size > 1 {
+        extra.push_str(&format!("\n  Thread: {} messages", hit.thread_size));
+    }
+    if !hit.attachments.is_empty() {
+        extra.push_str(&format!("\n  Attachments: {}", hit.attachments.join(", ")));
+    }
+
     format!(
-        "id {} — {date}{flag_note}\n  From: {sender}\n  Subject: {}\n  In: {location}\n",
+        "id {} — {date}{flag_note}\n  From: {sender}\n  Subject: {}\n  In: {location}{extra}\n",
         hit.rowid, hit.subject
     )
 }
@@ -653,10 +812,14 @@ mod tests {
             conversation_id: 1,
             mailbox_url: "imap://host/%5BGmail%5D/All%20Mail".into(),
             mailboxes: vec!["imap://host/INBOX".into(), "imap://host/Important".into()],
+            attachments: vec!["invoice.pdf".into()],
+            thread_size: 3,
         };
 
         let text = format_hit(&hit);
         assert!(text.contains("id 72"));
+        assert!(text.contains("Thread: 3 messages"), "got {text}");
+        assert!(text.contains("Attachments: invoice.pdf"), "got {text}");
         assert!(text.contains("[unread, flagged]"));
         assert!(text.contains("Cloudflare <noreply@notify.cloudflare.com>"));
         assert!(text.contains("In: INBOX, Important"), "got {text}");
@@ -677,6 +840,8 @@ mod tests {
             conversation_id: 1,
             mailbox_url: "imap://host/Drafts".into(),
             mailboxes: Vec::new(),
+            attachments: Vec::new(),
+            thread_size: 1,
         };
 
         let text = format_hit(&hit);
@@ -684,5 +849,8 @@ mod tests {
         assert!(text.contains("(unknown sender)"));
         assert!(text.contains("(no date)"));
         assert!(!text.contains('['), "no flag note expected: {text}");
+        // A lone message should not advertise a thread of one, nor an empty attachment list.
+        assert!(!text.contains("Thread:"), "got {text}");
+        assert!(!text.contains("Attachments:"), "got {text}");
     }
 }

@@ -674,6 +674,7 @@ dependencies = [
  "rmcp",
  "schemars",
  "serde",
+ "tempfile",
  "tokio",
 ]
 

@@ -35,12 +35,13 @@ Six tools over MCP:
 
 | tool | what it does |
 |---|---|
-| `search_mail` | find mail by subject, sender, mailbox, flags or date |
+| `search_mail` | find mail by subject, sender, recipient, body text, mailbox, flags, date |
 | `read_message` | read one message's headers and body |
 | `list_mailboxes` | the mailboxes and labels you can filter on |
 | `mail_status` | which accounts are loaded, what's readable, what isn't, and why |
 | `draft_message` | save a new draft in Mail's Drafts |
 | `draft_reply` | save a threaded reply draft to a message |
+| `save_attachment` | list attachments, or write them to files |
 
 **It cannot send mail.** There is no send path, no SMTP client, and no `send` anywhere in the
 codebase — drafts land in Mail's Drafts folder and a person reviews and sends them. Nothing
@@ -115,8 +116,9 @@ scoped to Mail — the right-sized permission. See [Modes](#modes).
 Stated plainly, because a mail tool that overstates its reach makes an agent confidently tell
 you an email doesn't exist:
 
-- **Bodies are not searched.** `search_mail` matches subjects and senders. Full-text search
-  over message bodies needs the `indexed` mode, which isn't built.
+- **Body search has no index.** It opens message files per query — fast for a few thousand
+  messages, bounded by a scan budget beyond that. An index would make it scale, at the cost of
+  keeping mail-derived data on disk.
 - **Not every body is on your Mac.** IMAP accounts set not to keep full copies store headers
   only. On my own store that's 370 of 989 messages — 37%, not an edge case. `read_message`
   says so explicitly instead of returning an empty body.
@@ -214,6 +216,7 @@ your newest message and flags the one case that's unresolvable in principle.
 | `rayl doctor` | which modes this machine can serve, and how to fix the others |
 | `rayl search` | metadata search from the terminal |
 | `rayl read <id>` | one message body; `--coverage` for how many bodies exist |
+| `rayl attachment <id>` | list or save attachments; `--list`, `--which`, `--dir` |
 | `rayl draft` | save a new draft; `--to`, `--subject`, `--body` |
 | `rayl draft-reply <id>` | save a threaded reply draft |
 | `rayl schema` | the envelope index's shape — tables, columns, row counts |
@@ -231,9 +234,8 @@ Roadmap:
 
 1. ~~`direct+live`: search, read, MCP server~~ — done
 2. ~~Drafting via Mail.app~~ — done
-3. Body search — the clearest remaining gap; an agent can find mail by sender and subject
-   but not by what the message says
-4. Attachment metadata, and a `to`/`cc` filter
+3. ~~Body search, attachments, recipient filter, thread grouping~~ — done
+4. `indexed` strategy — an index, so body search scales past a few thousand messages
 5. `script` source — the modes needing no Full Disk Access
 6. HTTP transport, for reaching the Mac from elsewhere
 

@@ -36,12 +36,17 @@ impl MessageKey {
 /// Defaults to the hash when the table is empty or the counts tie: that is what V10 uses for
 /// every side table observed so far, so it is the better guess when evidence is absent.
 pub fn resolve(conn: &Connection, table: &str) -> MessageKey {
+    resolve_on(conn, table, "message_id")
+}
+
+/// As [`resolve`], for a side table whose foreign key is not called `message_id` —
+/// `recipients` and `attachments` both call theirs `message`.
+pub fn resolve_on(conn: &Connection, table: &str, column: &str) -> MessageKey {
     let count = |join_column: &str| -> i64 {
-        // `table` comes from our own constants and `join_column` from MessageKey, so neither
-        // is user input.
-        let sql = format!(
-            "SELECT count(*) FROM {table} t JOIN messages m ON {join_column} = t.message_id"
-        );
+        // `table` and `column` come from our own constants and `join_column` from
+        // MessageKey, so none of this is user input.
+        let sql =
+            format!("SELECT count(*) FROM {table} t JOIN messages m ON {join_column} = t.{column}");
         conn.query_row(&sql, [], |row| row.get::<_, i64>(0)).unwrap_or(0)
     };
 
@@ -99,6 +104,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(resolve(&conn, "labels"), MessageKey::MessageIdHash);
+    }
+
+    #[test]
+    fn resolves_a_table_whose_key_column_is_named_differently() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE messages (ROWID INTEGER PRIMARY KEY, message_id INTEGER);
+             CREATE TABLE attachments (message INTEGER, name TEXT);
+             INSERT INTO messages (ROWID, message_id) VALUES (1, 9001), (2, 9002);
+             -- keyed on ROWID here
+             INSERT INTO attachments (message, name) VALUES (1, 'a.pdf'), (2, 'b.pdf');",
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_on(&conn, "attachments", "message"),
+            MessageKey::Rowid
+        );
     }
 
     #[test]

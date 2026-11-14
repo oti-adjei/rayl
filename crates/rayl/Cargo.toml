@@ -18,3 +18,6 @@ rmcp = { version = "3.10", features = ["server", "transport-io", "macros", "sche
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 serde = { version = "1", features = ["derive"] }
 schemars = "1"
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -14,7 +14,7 @@ use rusqlite::types::Value;
 
 use crate::epoch::{Epoch, detect};
 use crate::error::Result;
-use crate::keys::{MessageKey, resolve};
+use crate::keys::{MessageKey, resolve, resolve_on};
 
 #[derive(Debug, Clone, Default)]
 pub struct SearchQuery {
@@ -24,8 +24,13 @@ pub struct SearchQuery {
     pub from: Option<String>,
     /// Matched against the mailbox URL.
     pub mailbox: Option<String>,
+    /// Matched against any recipient's address or display name (To or Cc).
+    pub to: Option<String>,
+    /// Matched against message body text. Requires local bodies; see [`search_bodies`].
+    pub body: Option<String>,
     pub unread_only: bool,
     pub flagged_only: bool,
+    pub has_attachment: bool,
     /// Inclusive bounds in Unix seconds; converted to the store's own epoch internally.
     pub since: Option<i64>,
     pub until: Option<i64>,
@@ -51,6 +56,11 @@ pub struct SearchHit {
     /// Every mailbox the message is filed under, from `labels`. This is where INBOX, Sent
     /// and starred actually live on a Gmail account.
     pub mailboxes: Vec<String>,
+    /// Attachment filenames recorded in the index.
+    pub attachments: Vec<String>,
+    /// Messages sharing this `conversation_id`, so a caller can tell a standalone message
+    /// from one reply in a long thread.
+    pub thread_size: i64,
 }
 
 impl SearchHit {
@@ -67,6 +77,20 @@ pub struct SearchResults {
     pub total_matching: i64,
     pub epoch: Epoch,
     pub epoch_confident: bool,
+    /// Present when a body filter ran, so a caller can state its coverage honestly.
+    pub body_scan: Option<BodyScan>,
+}
+
+/// What a body search actually managed to look at.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BodyScan {
+    /// Messages whose body text was read and searched.
+    pub searched: usize,
+    /// Messages skipped because Mail has not downloaded the body. These are not misses —
+    /// they are unsearchable, and a caller should say so rather than imply absence.
+    pub unavailable: usize,
+    /// True when the candidate set was larger than the scan budget.
+    pub capped: bool,
 }
 
 /// Joins verified on V10; the key columns are resolved at runtime by [`crate::keys`] rather
@@ -75,10 +99,43 @@ pub struct SearchResults {
 /// The label subquery is what makes mailbox reporting correct on Gmail, where
 /// `messages.mailbox` is "All Mail" for nearly everything and the real filing lives in
 /// `labels`.
-fn select_clause(global_key: MessageKey, label_key: MessageKey) -> String {
+fn select_clause(keys: &Keys) -> String {
+    let message_id_header = if keys.has_global_data {
+        "g.message_id_header"
+    } else {
+        "NULL"
+    };
+    let global_join = if keys.has_global_data {
+        format!(
+            "LEFT JOIN message_global_data g ON g.message_id = {}",
+            keys.global_data.column()
+        )
+    } else {
+        String::new()
+    };
+    let label_urls = if keys.has_labels {
+        format!(
+            "(SELECT group_concat(lm.url, char(10)) FROM labels l
+                JOIN mailboxes lm ON lm.ROWID = l.mailbox_id
+               WHERE l.message_id = {})",
+            keys.label.column()
+        )
+    } else {
+        "NULL".to_string()
+    };
+    let attachment_names = if keys.has_attachments {
+        format!(
+            "(SELECT group_concat(at.name, char(10)) FROM attachments at
+               WHERE at.message = {} AND at.name IS NOT NULL)",
+            keys.attachment.column()
+        )
+    } else {
+        "NULL".to_string()
+    };
+
     format!(
         "SELECT m.ROWID,
-                g.message_id_header,
+                {message_id_header},
                 COALESCE(m.subject_prefix, '') || s.subject AS display_subject,
                 a.address,
                 a.comment,
@@ -88,18 +145,126 @@ fn select_clause(global_key: MessageKey, label_key: MessageKey) -> String {
                 m.size,
                 m.conversation_id,
                 mb.url,
-                (SELECT group_concat(lm.url, char(10))
-                   FROM labels l
-                   JOIN mailboxes lm ON lm.ROWID = l.mailbox_id
-                  WHERE l.message_id = {label}) AS label_urls
+                {label_urls} AS label_urls,
+                {attachment_names} AS attachment_names,
+                (SELECT count(*) FROM messages mt
+                  WHERE mt.conversation_id = m.conversation_id AND mt.deleted = 0) AS thread_size
          FROM messages m
          JOIN subjects s ON s.ROWID = m.subject
          JOIN mailboxes mb ON mb.ROWID = m.mailbox
          LEFT JOIN addresses a ON a.ROWID = m.sender
-         LEFT JOIN message_global_data g ON g.message_id = {global}",
-        label = label_key.column(),
-        global = global_key.column()
+         {global_join}"
     )
+}
+
+/// Which column of `messages` each side table joins against, resolved per query because the
+/// index is undocumented and inconsistent about it.
+#[derive(Debug, Clone, Copy)]
+struct Keys {
+    global_data: MessageKey,
+    label: MessageKey,
+    attachment: MessageKey,
+    recipient: MessageKey,
+    /// Which optional side tables this store actually has. A release that drops one should
+    /// cost the feature that needs it, not every search.
+    has_global_data: bool,
+    has_labels: bool,
+    has_attachments: bool,
+    has_recipients: bool,
+}
+
+impl Keys {
+    fn resolve(conn: &Connection) -> Self {
+        Self {
+            global_data: resolve(conn, "message_global_data"),
+            label: resolve(conn, "labels"),
+            attachment: resolve_on(conn, "attachments", "message"),
+            recipient: resolve_on(conn, "recipients", "message"),
+            has_global_data: table_exists(conn, "message_global_data"),
+            has_labels: table_exists(conn, "labels"),
+            has_attachments: table_exists(conn, "attachments"),
+            has_recipients: table_exists(conn, "recipients"),
+        }
+    }
+}
+
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+/// How many candidate bodies a single search will open. Scanning files is cheap per message
+/// but linear, so a very large mailbox gets a bounded answer rather than a slow one.
+pub const BODY_SCAN_BUDGET: usize = 3_000;
+
+/// Searches message bodies as well as metadata.
+///
+/// There is no index behind this: candidates are narrowed by the metadata filters, then their
+/// `.emlx` files are read and scanned. That keeps the `direct+live` promise — nothing is
+/// persisted — and for a mailbox of a few thousand messages it is fast enough that an index
+/// would be premature. It is linear, so [`BODY_SCAN_BUDGET`] bounds it.
+pub fn search_bodies(
+    db: &Path,
+    index: &crate::emlx::EmlxIndex,
+    query: &SearchQuery,
+    now_unix: i64,
+) -> Result<SearchResults> {
+    let Some(needle) = query.body.as_deref().map(str::to_lowercase) else {
+        return search(db, query, now_unix);
+    };
+
+    // Gather candidates using every filter except the body one, with a wide limit: the body
+    // test decides the final set, so the metadata query must not pre-truncate it.
+    let candidate_query = SearchQuery {
+        body: None,
+        limit: BODY_SCAN_BUDGET,
+        ..query.clone()
+    };
+    let candidates = search(db, &candidate_query, now_unix)?;
+    let capped = candidates.hits.len() >= BODY_SCAN_BUDGET;
+
+    let mut scan = BodyScan { capped, ..Default::default() };
+    let mut hits = Vec::new();
+
+    for hit in candidates.hits {
+        let Some(file) = index.get(hit.rowid) else {
+            scan.unavailable += 1;
+            continue;
+        };
+        if file.partial {
+            scan.unavailable += 1;
+            continue;
+        }
+        // Compaction off: searching should match what the message says, not what we would
+        // have shown after rewriting its links.
+        let Ok(message) = crate::emlx::read_with(file, false) else {
+            scan.unavailable += 1;
+            continue;
+        };
+        scan.searched += 1;
+
+        if message
+            .body()
+            .is_some_and(|body| body.to_lowercase().contains(&needle))
+        {
+            hits.push(hit);
+        }
+    }
+
+    let total_matching = hits.len() as i64;
+    hits.truncate(query.limit.max(1));
+
+    Ok(SearchResults {
+        hits,
+        total_matching,
+        epoch: candidates.epoch,
+        epoch_confident: candidates.epoch_confident,
+        body_scan: Some(scan),
+    })
 }
 
 /// Messages not in the trash. The denominator for any coverage statement.
@@ -143,8 +308,7 @@ fn search_where(
     let epoch = detection.as_ref().map(|d| d.epoch).unwrap_or(Epoch::Unix);
     let epoch_confident = detection.as_ref().map(|d| d.confident).unwrap_or(false);
 
-    let global_key = resolve(&conn, "message_global_data");
-    let label_key = resolve(&conn, "labels");
+    let keys = Keys::resolve(&conn);
 
     // Mailbox names must be resolved to ids before the query: the stored URLs are
     // percent-encoded, so matching a displayed name like "Sent Mail" against the raw URL
@@ -154,7 +318,7 @@ fn search_where(
         None => None,
     };
 
-    let (mut predicates, params) = build_filters(query, epoch, label_key, mailbox_ids.as_deref());
+    let (mut predicates, params) = build_filters(query, epoch, &keys, mailbox_ids.as_deref());
     if let Some(rowid) = only_rowid {
         predicates.push(format!("m.ROWID = {rowid}"));
     }
@@ -184,7 +348,7 @@ fn search_where(
          GROUP BY m.global_message_id
          ORDER BY m.date_sent DESC
          LIMIT ?{limit}",
-        select = select_clause(global_key, label_key),
+        select = select_clause(&keys),
         limit = params.len() + 1
     );
 
@@ -207,23 +371,41 @@ fn search_where(
                 size: row.get(8)?,
                 conversation_id: row.get(9)?,
                 mailbox_url: row.get(10)?,
-                mailboxes: row
-                    .get::<_, Option<String>>(11)?
-                    .map(|joined| joined.split('\n').map(str::to_string).collect())
-                    .unwrap_or_default(),
+                mailboxes: split_lines(row.get::<_, Option<String>>(11)?),
+                attachments: split_lines(row.get::<_, Option<String>>(12)?),
+                thread_size: row.get::<_, Option<i64>>(13)?.unwrap_or(1),
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
-    Ok(SearchResults { hits, total_matching, epoch, epoch_confident })
+    Ok(SearchResults {
+        hits,
+        total_matching,
+        epoch,
+        epoch_confident,
+        body_scan: None,
+    })
 }
 
 /// Builds the shared WHERE clause. Positional parameters keep user input out of the SQL
 /// text; only the parameter *indices* are interpolated.
+/// Splits a `group_concat` result, dropping blanks.
+fn split_lines(joined: Option<String>) -> Vec<String> {
+    joined
+        .map(|text| {
+            text.split('\n')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn build_filters(
     query: &SearchQuery,
     epoch: Epoch,
-    label_key: MessageKey,
+    keys: &Keys,
     mailbox_ids: Option<&[i64]>,
 ) -> (Vec<String>, Vec<Value>) {
     let mut predicates = vec!["m.deleted = 0".to_string()];
@@ -258,13 +440,36 @@ fn build_filters(
                 .map(|id| id.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            predicates.push(format!(
-                "(m.mailbox IN ({list})
-                  OR EXISTS (SELECT 1 FROM labels l
-                              WHERE l.message_id = {label} AND l.mailbox_id IN ({list})))",
-                label = label_key.column()
-            ));
+            let label_clause = if keys.has_labels {
+                format!(
+                    " OR EXISTS (SELECT 1 FROM labels l
+                                  WHERE l.message_id = {} AND l.mailbox_id IN ({list}))",
+                    keys.label.column()
+                )
+            } else {
+                String::new()
+            };
+            predicates.push(format!("(m.mailbox IN ({list}){label_clause})"));
         }
+    }
+    if let Some(recipient) = query.to.as_ref().filter(|_| keys.has_recipients) {
+        let i = next(&mut params, Value::Text(like_pattern(recipient)));
+        // Recipients are normalised into their own table, so this is an EXISTS rather than a
+        // join: a message with four recipients must still appear once.
+        predicates.push(format!(
+            "EXISTS (SELECT 1 FROM recipients r
+                       JOIN addresses ra ON ra.ROWID = r.address
+                      WHERE r.message = {recipient_key}
+                        AND (ra.address LIKE ?{i} ESCAPE '\\'
+                             OR ra.comment LIKE ?{i} ESCAPE '\\'))",
+            recipient_key = keys.recipient.column()
+        ));
+    }
+    if query.has_attachment && keys.has_attachments {
+        predicates.push(format!(
+            "EXISTS (SELECT 1 FROM attachments at WHERE at.message = {attachment})",
+            attachment = keys.attachment.column()
+        ));
     }
     if query.unread_only {
         predicates.push("m.read = 0".to_string());
@@ -297,6 +502,7 @@ fn like_pattern(term: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::MailStore;
 
     const NOW: i64 = 1_794_528_000; // 2026-11-13
 
@@ -316,11 +522,15 @@ mod tests {
              CREATE TABLE mailboxes (ROWID INTEGER PRIMARY KEY, url TEXT NOT NULL);
              CREATE TABLE message_global_data (ROWID INTEGER PRIMARY KEY, message_id INTEGER, message_id_header TEXT);
              CREATE TABLE labels (message_id INTEGER, mailbox_id INTEGER);
+             CREATE TABLE recipients (ROWID INTEGER PRIMARY KEY, message INTEGER, address INTEGER, type INTEGER);
+             CREATE TABLE attachments (ROWID INTEGER PRIMARY KEY, message INTEGER, name TEXT);
 
              INSERT INTO subjects (ROWID, subject) VALUES (1, 'Invoice 100% due'), (2, 'Weekly report');
              INSERT INTO addresses (ROWID, address, comment) VALUES
                 (1, 'billing@vendor.test', 'Vendor Billing'),
-                (2, 'boss@work.test', '');
+                (2, 'boss@work.test', ''),
+                (3, 'me@home.test', 'Me'),
+                (4, 'work.me@company.test', 'Me At Work');
              INSERT INTO mailboxes (ROWID, url) VALUES
                 (1, 'imap://me%40gmail.com@imap.gmail.com/INBOX'),
                 (2, 'imap://me%40gmail.com@imap.gmail.com/Archive');
@@ -337,7 +547,10 @@ mod tests {
                 (1, 9001, 7001, 1, 'Re: ', 1, {d1}, 1, 0, 1, 0, 2048, 500),
                 (2, 9002, 7002, 2, NULL,  2, {d2}, 1, 1, 0, 0, 1024, 501),
                 (3, 9001, 7001, 1, 'Re: ', 1, {d1}, 2, 0, 1, 0, 2048, 500);
-             INSERT INTO labels (message_id, mailbox_id) VALUES (9001, 1), (9001, 2), (9002, 1);",
+             INSERT INTO labels (message_id, mailbox_id) VALUES (9001, 1), (9001, 2), (9002, 1);
+             -- message 1 (hash 9001) went to the home address; message 2 to the work one
+             INSERT INTO recipients (message, address, type) VALUES (9001, 3, 0), (9002, 4, 0);
+             INSERT INTO attachments (message, name) VALUES (9001, 'invoice.pdf');",
             d1 = NOW - 3600,
             d2 = NOW - 86_400 * 10
         ))
@@ -364,6 +577,225 @@ mod tests {
     fn an_unknown_id_is_none_rather_than_an_error() {
         let (_dir, db) = fixture();
         assert!(hit_by_rowid(&db, 9999, NOW).unwrap().is_none());
+    }
+
+    #[test]
+    fn recipient_filter_matches_to_addresses() {
+        let (_dir, db) = fixture();
+
+        let mut q = query();
+        q.to = Some("me@home.test".into());
+        let results = search(&db, &q, NOW).unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].rowid, 1);
+
+        // Two of the user's addresses route into one mailbox; this is the question that
+        // could not be asked before.
+        let mut q = query();
+        q.to = Some("work.me".into());
+        let results = search(&db, &q, NOW).unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].rowid, 2);
+
+        // Display names are matched too.
+        let mut q = query();
+        q.to = Some("Me At Work".into());
+        assert_eq!(search(&db, &q, NOW).unwrap().hits.len(), 1);
+    }
+
+    #[test]
+    fn attachment_filter_and_names() {
+        let (_dir, db) = fixture();
+
+        let mut q = query();
+        q.has_attachment = true;
+        let results = search(&db, &q, NOW).unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].attachments, vec!["invoice.pdf".to_string()]);
+
+        // The message without one reports an empty list, not a phantom entry.
+        let all = search(&db, &query(), NOW).unwrap();
+        let plain = all.hits.iter().find(|h| h.rowid == 2).unwrap();
+        assert!(plain.attachments.is_empty());
+    }
+
+    #[test]
+    fn thread_size_counts_messages_sharing_a_conversation() {
+        let (_dir, db) = fixture();
+        let results = search(&db, &query(), NOW).unwrap();
+
+        // Rows 1 and 3 share conversation 500; row 2 is alone in 501.
+        let threaded = results.hits.iter().find(|h| h.rowid == 1).unwrap();
+        assert_eq!(threaded.thread_size, 2);
+        let lone = results.hits.iter().find(|h| h.rowid == 2).unwrap();
+        assert_eq!(lone.thread_size, 1);
+    }
+
+    #[test]
+    fn a_store_missing_optional_tables_still_searches() {
+        // A macOS release that drops a side table should cost that feature, not everything.
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("Envelope Index");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE messages (ROWID INTEGER PRIMARY KEY, message_id INTEGER,
+                global_message_id INTEGER, sender INTEGER, subject_prefix TEXT,
+                subject INTEGER NOT NULL, date_sent INTEGER, mailbox INTEGER NOT NULL,
+                read INTEGER NOT NULL, flagged INTEGER NOT NULL, deleted INTEGER NOT NULL,
+                size INTEGER NOT NULL, conversation_id INTEGER NOT NULL);
+             CREATE TABLE subjects (ROWID INTEGER PRIMARY KEY, subject TEXT NOT NULL);
+             CREATE TABLE addresses (ROWID INTEGER PRIMARY KEY, address TEXT NOT NULL, comment TEXT NOT NULL);
+             CREATE TABLE mailboxes (ROWID INTEGER PRIMARY KEY, url TEXT NOT NULL);
+             INSERT INTO subjects (ROWID, subject) VALUES (1, 'Bare store');
+             INSERT INTO addresses (ROWID, address, comment) VALUES (1, 'a@b.test', '');
+             INSERT INTO mailboxes (ROWID, url) VALUES (1, 'imap://host/INBOX');
+             INSERT INTO messages VALUES (1, 9001, 7001, 1, NULL, 1, {d}, 1, 1, 0, 0, 10, 1);",
+            d = NOW - 60
+        ))
+        .unwrap();
+        drop(conn);
+
+        let results = search(&db, &query(), NOW).unwrap();
+        assert_eq!(results.hits.len(), 1, "search must still work");
+        assert_eq!(results.hits[0].subject, "Bare store");
+        // Features that need the absent tables degrade quietly.
+        assert!(results.hits[0].message_id_header.is_none());
+        assert!(results.hits[0].mailboxes.is_empty());
+        assert!(results.hits[0].attachments.is_empty());
+    }
+
+    /// Writes a real `.emlx` so the body scanner has files to open.
+    fn write_emlx(dir: &std::path::Path, id: i64, body: &str) {
+        let messages = dir.join("Inbox.mbox/UUID/Data/1/Messages");
+        std::fs::create_dir_all(&messages).unwrap();
+        let raw = format!("Subject: Message {id}\r\n\r\n{body}\r\n");
+        let mut bytes = format!("{}\n", raw.len()).into_bytes();
+        bytes.extend_from_slice(raw.as_bytes());
+        std::fs::write(messages.join(format!("{id}.emlx")), bytes).unwrap();
+    }
+
+    #[test]
+    fn body_search_matches_text_the_subject_does_not_contain() {
+        let (dir, db) = fixture();
+
+        // The real motivating case: a generic subject, with the useful detail only in the
+        // body. Message 1's subject is "Invoice 100% due"; nothing says "Ghana".
+        write_emlx(dir.path(), 1, "The deadline is 3 March and the office is in Ghana.");
+        write_emlx(dir.path(), 2, "Nothing interesting here.");
+
+        let store = MailStore {
+            root: dir.path().into(),
+            version: 10,
+            path: dir.path().into(),
+        };
+        let index = crate::emlx::EmlxIndex::build(&store).unwrap();
+
+        let mut q = query();
+        q.body = Some("ghana".into());
+        let results = search_bodies(&db, &index, &q, NOW).unwrap();
+
+        assert_eq!(results.hits.len(), 1, "matched on body text alone");
+        assert_eq!(results.hits[0].rowid, 1);
+
+        let scan = results.body_scan.expect("coverage reported");
+        assert_eq!(scan.searched, 2);
+        assert_eq!(scan.unavailable, 0);
+        assert!(!scan.capped);
+    }
+
+    #[test]
+    fn body_search_is_case_insensitive_and_reports_no_match_honestly() {
+        let (dir, db) = fixture();
+        write_emlx(dir.path(), 1, "Deadline is 3 March.");
+        write_emlx(dir.path(), 2, "Nothing here.");
+        let store = MailStore { root: dir.path().into(), version: 10, path: dir.path().into() };
+        let index = crate::emlx::EmlxIndex::build(&store).unwrap();
+
+        let mut q = query();
+        q.body = Some("DEADLINE".into());
+        assert_eq!(search_bodies(&db, &index, &q, NOW).unwrap().hits.len(), 1);
+
+        let mut q = query();
+        q.body = Some("nonexistent phrase".into());
+        let results = search_bodies(&db, &index, &q, NOW).unwrap();
+        assert!(results.hits.is_empty());
+        assert_eq!(results.body_scan.unwrap().searched, 2);
+    }
+
+    #[test]
+    fn body_search_counts_undownloaded_bodies_as_unsearchable_not_as_misses() {
+        let (dir, db) = fixture();
+        // Message 1 has a real body; message 2 has only headers, as an IMAP account that
+        // keeps no local copies produces.
+        write_emlx(dir.path(), 1, "contains the term widget");
+        let messages = dir.path().join("Inbox.mbox/UUID/Data/1/Messages");
+        std::fs::create_dir_all(&messages).unwrap();
+        std::fs::write(messages.join("2.partial.emlx"), b"0\n").unwrap();
+
+        let store = MailStore { root: dir.path().into(), version: 10, path: dir.path().into() };
+        let index = crate::emlx::EmlxIndex::build(&store).unwrap();
+
+        let mut q = query();
+        q.body = Some("widget".into());
+        let results = search_bodies(&db, &index, &q, NOW).unwrap();
+
+        assert_eq!(results.hits.len(), 1);
+        let scan = results.body_scan.expect("coverage reported");
+        assert_eq!(scan.searched, 1);
+        assert_eq!(scan.unavailable, 1, "the partial must be reported, not ignored");
+    }
+
+    #[test]
+    fn body_search_combines_with_metadata_filters() {
+        let (dir, db) = fixture();
+        write_emlx(dir.path(), 1, "shared term");
+        write_emlx(dir.path(), 2, "shared term");
+        let store = MailStore { root: dir.path().into(), version: 10, path: dir.path().into() };
+        let index = crate::emlx::EmlxIndex::build(&store).unwrap();
+
+        // Both bodies match, but only one is from the vendor.
+        let mut q = query();
+        q.body = Some("shared term".into());
+        assert_eq!(search_bodies(&db, &index, &q, NOW).unwrap().hits.len(), 2);
+
+        let mut q = query();
+        q.body = Some("shared term".into());
+        q.from = Some("vendor.test".into());
+        let narrowed = search_bodies(&db, &index, &q, NOW).unwrap();
+        assert_eq!(narrowed.hits.len(), 1);
+        assert_eq!(narrowed.hits[0].rowid, 1);
+        assert_eq!(
+            narrowed.body_scan.unwrap().searched,
+            1,
+            "metadata filters should narrow before any file is opened"
+        );
+    }
+
+    #[test]
+    fn a_query_without_a_body_filter_skips_scanning_entirely() {
+        let (dir, db) = fixture();
+        let store = MailStore { root: dir.path().into(), version: 10, path: dir.path().into() };
+        let index = crate::emlx::EmlxIndex::build(&store).unwrap();
+
+        let results = search_bodies(&db, &index, &query(), NOW).unwrap();
+        assert!(results.body_scan.is_none(), "no scan should be claimed");
+        assert_eq!(results.hits.len(), 2);
+    }
+
+    #[test]
+    fn body_search_respects_the_limit_while_reporting_the_true_total() {
+        let (dir, db) = fixture();
+        write_emlx(dir.path(), 1, "common");
+        write_emlx(dir.path(), 2, "common");
+        let store = MailStore { root: dir.path().into(), version: 10, path: dir.path().into() };
+        let index = crate::emlx::EmlxIndex::build(&store).unwrap();
+
+        let mut q = query();
+        q.body = Some("common".into());
+        q.limit = 1;
+        let results = search_bodies(&db, &index, &q, NOW).unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.total_matching, 2, "the count must not be truncated too");
     }
 
     #[test]
