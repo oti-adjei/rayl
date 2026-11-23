@@ -35,4 +35,9 @@ if [ -d "$bin_dir/rayl" ]; then
 fi
 mv -f "$staged_binary" "$bin_dir/rayl"
 printf 'Installed Rayl to %s\n' "$bin_dir/rayl"
-printf 'Check Mail access with: "$HOME/.local/bin/rayl" doctor\n'
+if [ "$(command -v rayl || true)" != "$bin_dir/rayl" ]; then
+    printf '\nTo run this installation as rayl, add its directory to your PATH:\n'
+    printf '%s\n' '  export PATH="$HOME/.local/bin:$PATH"'
+    printf '%s\n' 'For future zsh sessions, add that line to ~/.zshrc.'
+fi
+printf '\nCheck Mail access with: rayl doctor\n'
