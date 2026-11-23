@@ -3,15 +3,15 @@ resolver = "3"
 members = ["crates/rayl-core", "crates/rayl"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
-rust-version = "1.85"
+rust-version = "1.88"
 repository = "https://github.com/oti-adjei/rayl"
 readme = "README.md"
 
 [workspace.dependencies]
-rayl-core = { path = "crates/rayl-core", version = "0.1.0" }
+rayl-core = { path = "crates/rayl-core", version = "0.1.1" }
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
