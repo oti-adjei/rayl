@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 readme.workspace = true
-keywords = ["mcp", "apple-mail", "mail", "macos", "model-context-protocol"]
+keywords = ["mcp", "apple-mail", "mail", "macos"]
 categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
