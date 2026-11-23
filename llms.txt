@@ -1,0 +1,42 @@
+# rayl
+
+> An MCP server for Apple Mail, written in Rust. It lets AI assistants search, read, and
+> draft with the mail already on a Mac — no API, no OAuth, no rate limits, nothing leaving
+> the machine.
+
+rayl reads Apple Mail's local SQLite envelope index and `.emlx` message files directly. An
+agent connected over MCP can search mail metadata fast, read downloaded bodies, list
+mailboxes and labels, save drafts to Mail's Drafts folder, and export attachments. It cannot
+send mail, cannot delete or modify existing messages, and never touches the network.
+
+## Key facts
+
+- Licence: MIT
+- Platform: macOS only, verified against Apple Mail V10
+- Protocol: Model Context Protocol (MCP) over stdio
+- Language: Rust
+- Source: https://github.com/oti-adjei/rayl
+- Setup guide: https://github.com/oti-adjei/rayl/blob/main/docs/mcp.md
+
+## Tools
+
+- `search_mail` — find mail by subject, sender, recipient, body text, mailbox, flags, date
+- `read_message` — read one message's headers and body
+- `list_mailboxes` — mailboxes and labels available for filtering
+- `mail_status` — which accounts are loaded, what's readable, and why
+- `draft_message` — save a new draft in Mail's Drafts (never sends)
+- `draft_reply` — save a threaded reply draft (never sends)
+- `save_attachment` — list attachments, or write them to files
+
+## Limits, stated honestly
+
+- Reading requires Full Disk Access granted to the app that launches rayl; drafting
+  additionally needs Automation access to Mail.app, with Mail running.
+- Body search is linear and unindexed; messages Mail stores as headers-only cannot be
+  searched (37% of messages on the author's own store).
+- rayl persists nothing between requests in the current mode.
+
+## Docs
+
+- README: https://github.com/oti-adjei/rayl#readme
+- MCP setup and every tool parameter: https://github.com/oti-adjei/rayl/blob/main/docs/mcp.md

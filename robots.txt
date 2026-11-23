@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+# AI crawlers are welcome here — rayl exists for agents.
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+Sitemap: https://rayl.vercel.app/sitemap.xml
