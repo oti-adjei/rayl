@@ -29,7 +29,11 @@ jobs:
             target/aarch64-apple-darwin/release/rayl \
             target/x86_64-apple-darwin/release/rayl \
             -output dist/rayl
-          lipo -verify_arch arm64 x86_64 dist/rayl
+          architectures=$(lipo -archs dist/rayl)
+          if [[ "$architectures" != "arm64 x86_64" && "$architectures" != "x86_64 arm64" ]]; then
+            echo "Expected arm64 and x86_64 in dist/rayl, found: $architectures" >&2
+            exit 1
+          fi
           chmod +x dist/rayl
           cd dist
           tar -czf rayl-macos-universal.tar.gz rayl
