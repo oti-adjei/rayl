@@ -44,6 +44,11 @@ Use an absolute path: the client does not inherit your shell's `PATH`.
 > application that launches the process. Granting it to your terminal does not help Claude
 > Desktop — that app needs its own grant. `mail_status` names whichever application needs it.
 
+## Other clients — Cursor, VS Code, Windsurf, Zed, Codex, Gemini CLI, Goose, Cline…
+
+rayl speaks the standard protocol, so any MCP-compatible client works. Each client names
+the server in its own config format: **[exact snippets for every client → docs/clients.md](clients.md)**.
+
 ## Tools
 
 ### `search_mail`

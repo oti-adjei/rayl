@@ -72,6 +72,13 @@ cargo build --release
 ./target/release/rayl doctor
 ```
 
+Or grab a prebuilt universal binary — no Rust toolchain needed:
+
+```bash
+curl -fsSL https://github.com/oti-adjei/rayl/releases/latest/download/rayl-macos-universal.tar.gz | tar -xz
+./rayl doctor
+```
+
 `doctor` tells you whether this machine can serve mail, and exactly what to fix if not. It
 must report `direct read path available` before the next step is worth doing.
 
@@ -99,6 +106,16 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```
 
 </details>
+
+### Any other MCP client
+
+rayl speaks the standard protocol, so Cursor, VS Code, Windsurf, Zed, Codex, Gemini CLI,
+Goose and friends all work — each just names the server in its own config file:
+**[every client's exact setup → docs/clients.md](docs/clients.md)**.
+
+One thing that genuinely differs per client: macOS grants Full Disk Access to *the app that
+launches rayl*, so each new client needs its own grant. `rayl doctor` names the exact
+application to approve.
 
 Full setup, every tool parameter, and troubleshooting: **[docs/mcp.md](docs/mcp.md)**.
 

@@ -1,0 +1,42 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build both architectures
+        run: cargo build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
+
+      - name: Assemble universal binary
+        run: |
+          mkdir -p dist
+          lipo -create \
+            target/aarch64-apple-darwin/release/rayl \
+            target/x86_64-apple-darwin/release/rayl \
+            -output dist/rayl
+          chmod +x dist/rayl
+          cd dist
+          tar -czf rayl-macos-universal.tar.gz rayl
+          shasum -a 256 rayl-macos-universal.tar.gz > rayl-macos-universal.tar.gz.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/rayl-macos-universal.tar.gz
+            dist/rayl-macos-universal.tar.gz.sha256
+          generate_release_notes: true
