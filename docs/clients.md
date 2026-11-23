@@ -90,6 +90,16 @@ args = ["serve"]
 }
 ```
 
+### Pi
+
+```bash
+pi mcp add rayl -- "$HOME/.local/bin/rayl" serve
+pi mcp list
+```
+
+Use the absolute path to your binary if you installed elsewhere. In a running Pi session,
+run `/reload` to load the new configuration.
+
 ### Cline
 
 `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
@@ -127,8 +137,9 @@ authoritative — rayl needs nothing client-specific.
 
 ## Which app gets Full Disk Access
 
-macOS grants Full Disk Access to **the application that launches rayl**, so wiring a new
-client means a grant for *that* client:
+Grant Full Disk Access to **the application that launches rayl** if you want that client
+to search or read mail. To create new drafts only, open Mail.app and allow Automation when
+prompted. Skip Full Disk Access for that setup.
 
 | Client | Grant Full Disk Access to |
 |---|---|

@@ -63,6 +63,7 @@ pub fn report(diagnosis: &Diagnosis) {
     println!();
 
     verdict_lines(diagnosis);
+    println!("New drafts use Mail Automation. Open Mail.app and allow Automation when prompted.");
 }
 
 fn modes_table(diagnosis: &Diagnosis) {
@@ -75,6 +76,9 @@ fn modes_table(diagnosis: &Diagnosis) {
         search = "search"
     );
     for (mode, state) in &diagnosis.modes {
+        if mode.name() != "direct+live" {
+            continue;
+        }
         let (marker, status) = match state {
             Availability::Available => ("+", "available".to_string()),
             Availability::NeedsAction(what) => ("~", format!("needs: {what}")),
@@ -140,16 +144,10 @@ fn verdict_lines(diagnosis: &Diagnosis) {
     match &diagnosis.verdict {
         Verdict::Direct => {
             println!("Verdict: direct read path available.");
-            println!("Every mode is open; direct+live persists nothing and is the cheapest.");
+            println!("rayl serve reads through direct+live without keeping an index.");
         }
-        Verdict::ScriptFallback(reason) => {
-            println!("Verdict: direct read path unavailable; script modes remain open.");
-            println!("See the mode table above for what that costs.");
-            println!();
-            explain(reason, diagnosis);
-        }
-        Verdict::Unavailable(reason) => {
-            println!("Verdict: no read path available.");
+        Verdict::ScriptFallback(reason) | Verdict::Unavailable(reason) => {
+            println!("Verdict: direct read path unavailable.");
             println!();
             explain(reason, diagnosis);
         }

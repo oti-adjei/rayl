@@ -75,18 +75,32 @@ cargo build --release
 Or grab a prebuilt universal binary — no Rust toolchain needed:
 
 ```bash
-curl -fsSL https://github.com/oti-adjei/rayl/releases/latest/download/rayl-macos-universal.tar.gz | tar -xz
-./rayl doctor
+(
+  set -e
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "$workdir"' EXIT
+  cd "$workdir"
+  release=https://github.com/oti-adjei/rayl/releases/latest/download
+  archive=rayl-macos-universal.tar.gz
+  curl -fLO "$release/$archive"
+  curl -fLO "$release/$archive.sha256"
+  shasum -a 256 -c "$archive.sha256"
+  tar -xzf "$archive"
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 rayl "$HOME/.local/bin/rayl"
+) && "$HOME/.local/bin/rayl" doctor
 ```
 
-`doctor` tells you whether this machine can serve mail, and exactly what to fix if not. It
-must report `direct read path available` before the next step is worth doing.
+`doctor` checks whether rayl can read Apple Mail. For search, reading, mailbox listing,
+attachments, and reply drafts, look for `direct read path available`. You can skip Full Disk
+Access if you only want to create new drafts. Open Mail.app and allow Automation when prompted.
 
-Then wire it to a client:
+Then configure your client with the absolute path to the binary. If you built from source,
+replace `"$HOME/.local/bin/rayl"` below with the path to `target/release/rayl`.
 
 ```bash
 # Claude Code
-claude mcp add rayl --scope user -- "$PWD/target/release/rayl" serve
+claude mcp add rayl --scope user -- "$HOME/.local/bin/rayl" serve
 ```
 
 <details>
@@ -98,7 +112,7 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "rayl": {
-      "command": "/absolute/path/to/rayl/target/release/rayl",
+      "command": "/Users/yourname/.local/bin/rayl",
       "args": ["serve"]
     }
   }
@@ -114,12 +128,12 @@ Goose and friends all work — each just names the server in its own config file
 **[every client's exact setup → docs/clients.md](docs/clients.md)**.
 
 One thing that genuinely differs per client: macOS grants Full Disk Access to *the app that
-launches rayl*, so each new client needs its own grant. `rayl doctor` names the exact
+launches rayl*. Grant it to each client you want to use for reading mail. `rayl doctor` names the exact
 application to approve.
 
 Full setup, every tool parameter, and troubleshooting: **[docs/mcp.md](docs/mcp.md)**.
 
-## The one real catch: Full Disk Access
+## Permissions for reading mail
 
 `~/Library/Mail` is protected by macOS privacy controls, and macOS offers **no narrow "read my
 mail" permission** — the directory sits in the catch-all protected set alongside Safari
@@ -183,8 +197,7 @@ nothing, so there's no stale copy of your mail anywhere and no index to leak.
 
 ## Modes
 
-Access to mail is two independent choices: where data comes from, and how a search is
-answered. `rayl doctor` reports which combinations your machine can serve.
+`rayl serve` uses `direct+live` for reading mail. `rayl doctor` checks whether that read path is available. The other read modes below are planned.
 
 | mode | permission | persists | search |
 |---|---|---|---|

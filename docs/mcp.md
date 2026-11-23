@@ -6,14 +6,18 @@ existing mail.
 
 ## Install
 
+For a prebuilt macOS release, use the [README install commands](../README.md#quick-start).
+To build from source, run the following from the repository root.
+
 ```bash
-cd 03-code/rayl
 cargo build --release
 ./target/release/rayl doctor     # confirm access before wiring anything up
 ```
 
-`doctor` must report `Verdict: direct read path available` before the server can return mail.
-If it does not, fix that first — see [Permissions](#permissions).
+`doctor` reports `Verdict: direct read path available` when rayl can search and read mail.
+Those tools, mailbox listing, attachments, and reply drafts use Full Disk Access. For new
+drafts only, skip Full Disk Access, open Mail.app, and allow Automation when prompted.
+See [Permissions](#permissions).
 
 ## Configure a client
 
@@ -218,7 +222,7 @@ saved; `raw_urls` turns it off.
 
 ## Permissions
 
-Two separate grants are involved, and they are unrelated to each other.
+Choose the permissions for the tools you want to use.
 
 ### Automation, for drafting
 
