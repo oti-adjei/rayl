@@ -6,8 +6,8 @@ Static landing page for [rayl](https://github.com/oti-adjei/rayl), deployed from
 ## Deploying
 
 Hosted on Vercel: import the repo, set the production branch to `site`, root directory `/`.
-No build step — `index.html` and `brand/` are served as-is. `404.html` is picked up
-automatically.
+No frontend build step. Vercel serves the static files and deploys `api/downloads.js` as a
+Node.js function. `404.html` is picked up automatically.
 
 ## Web Analytics
 
@@ -15,6 +15,10 @@ On the Vercel project dashboard, open **Analytics** and select **Enable**, then 
 the `site` branch. Open the production homepage and check that
 `/_vercel/insights/script.js` loads and `/_vercel/insights/view` receives a pageview.
 The Analytics dashboard shows visitors and pageviews for the landing page.
+
+The install section fetches release download counts from `/api/downloads` on page load.
+Successful counts are cached at the edge for 15 minutes. On deployment, check that the
+endpoint returns `github` and `crates` counts. A `null` means that source was unavailable.
 
 ## The production URL
 

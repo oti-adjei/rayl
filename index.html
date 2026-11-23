@@ -213,6 +213,10 @@
       <div class="setup">
         <div class="terminal"><div class="code-title">Prebuilt binary · macOS universal</div><pre><code>installer="$(curl -fsSL https://raw.githubusercontent.com/oti-adjei/rayl/main/install.sh)" &amp;&amp; sh -c "$installer"</code></pre></div>
         <p>The installer verifies the release checksum and puts rayl in <code>~/.local/bin</code>. Run <code>~/.local/bin/rayl doctor</code> after installing.</p>
+        <p id="download-counts" hidden aria-live="polite">
+          <a href="https://github.com/oti-adjei/rayl/releases">macOS binary downloads</a>: <strong id="github-downloads">Unavailable</strong>
+          · <a href="https://crates.io/crates/rayl">crates.io downloads</a>: <strong id="crates-downloads">Unavailable</strong>
+        </p>
         <p>With a Rust toolchain, you can also clone and build from source.</p>
         <div class="terminal"><div class="code-title">Build from source</div><pre><code>git clone https://github.com/oti-adjei/rayl
 cd rayl
@@ -259,5 +263,26 @@ pi mcp list</code></pre></div>
   window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
 </script>
 <script defer src="/_vercel/insights/script.js"></script>
+<script>
+  async function showDownloadCounts() {
+    const section = document.getElementById('download-counts');
+    try {
+      const response = await fetch('/api/downloads');
+      if (!response.ok) return;
+      const counts = await response.json();
+      const formatter = new Intl.NumberFormat(document.documentElement.lang);
+      for (const source of ['github', 'crates']) {
+        const count = counts[source];
+        if (Number.isSafeInteger(count) && count >= 0) {
+          document.getElementById(`${source}-downloads`).textContent = formatter.format(count);
+          section.hidden = false;
+        }
+      }
+    } catch {
+      // The install instructions still work if the counts cannot load.
+    }
+  }
+  showDownloadCounts();
+</script>
 </body>
 </html>
