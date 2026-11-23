@@ -9,6 +9,13 @@ Hosted on Vercel: import the repo, set the production branch to `site`, root dir
 No build step — `index.html` and `brand/` are served as-is. `404.html` is picked up
 automatically.
 
+## Web Analytics
+
+On the Vercel project dashboard, open **Analytics** and select **Enable**, then deploy
+the `site` branch. Open the production homepage and check that
+`/_vercel/insights/script.js` loads and `/_vercel/insights/view` receives a pageview.
+The Analytics dashboard shows visitors and pageviews for the landing page.
+
 ## The production URL
 
 `https://rayl.vercel.app` is written into three files — `index.html` (canonical + og:url +
