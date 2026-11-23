@@ -11,7 +11,7 @@ repository = "https://github.com/oti-adjei/rayl"
 readme = "README.md"
 
 [workspace.dependencies]
-rayl-core = { path = "crates/rayl-core" }
+rayl-core = { path = "crates/rayl-core", version = "0.1.0" }
 anyhow = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
