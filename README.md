@@ -1,5 +1,16 @@
 # rayl
 
+<p align="center">
+  <img src="brand/readme-banner.svg" alt="rayl — The mail is already here" width="640">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-004be4.svg"></a>
+  <a href="Cargo.toml"><img alt="built with Rust" src="https://img.shields.io/badge/built%20with-Rust-004be4.svg"></a>
+  <a href="docs/mcp.md"><img alt="protocol MCP" src="https://img.shields.io/badge/protocol-MCP-004be4.svg"></a>
+  <img alt="platform macOS" src="https://img.shields.io/badge/platform-macOS-004be4.svg">
+</p>
+
 **An MCP server for Apple Mail, written in Rust.** It reads the mail already sitting on your
 Mac — no API, no OAuth, no rate limits, nothing leaving the machine.
 
@@ -31,7 +42,7 @@ out to be the most quota-proof mail API available.
 
 ## What you get
 
-Six tools over MCP:
+Seven tools over MCP:
 
 | tool | what it does |
 |---|---|
