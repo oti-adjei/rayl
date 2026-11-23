@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="rayl is a local MCP server for Apple Mail. Search, read, and draft with the mail already on your Mac.">
+<meta name="theme-color" content="#f3f5f8">
+<meta property="og:title" content="rayl — The mail is already here">
+<meta property="og:description" content="An MCP server for Apple Mail. Search, read, and draft with the mail already on your Mac — no API, no OAuth, nothing leaving the machine.">
+<meta property="og:image" content="https://raw.githubusercontent.com/oti-adjei/rayl/site/brand/social-preview.png">
+<meta property="twitter:card" content="summary_large_image">
+<title>rayl — The mail is already here</title>
+<link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+<style>
+/* OD-LAYOUT-PRIMITIVES v1 — structure only: display, flex/grid, overflow, wrapping, ratio, geometry.
+   Put this @layer first; product CSS outside the layer wins ordinary layout rules.
+   Native hidden and closed-dialog states take precedence over component display rules. */
+@layer od-layout {
+  [hidden]:not([hidden="until-found" i]) { display: none !important; }
+  dialog:not([open]) { display: none !important; }
+
+  :where(.od-stack,.od-row,.od-row-top,.od-cluster,.od-grid,.od-field,.od-stat,.od-cell,.od-tile) > :where(*) { min-width: 0; }
+
+  /* containers */
+  .od-stack   { display: flex; flex-direction: column; gap: var(--od-gap, 8px); }
+  .od-row     { display: flex; align-items: center; gap: var(--od-gap, 8px); }
+  .od-row-top { display: flex; align-items: flex-start; gap: var(--od-gap, 8px); }
+  .od-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--od-gap, 8px); }
+  .od-fill    { flex: 1 1 0; min-width: 0; }
+  .od-fixed   { flex: none; }
+  .od-grid    { display: grid; gap: var(--od-gap, 12px); grid-template-columns: repeat(var(--od-cols, 3), minmax(0, 1fr)); }
+
+  /* stacked information: each piece is its own line — never sibling inline spans */
+  .od-stat, .od-field, .od-cell { display: grid; gap: var(--od-gap, 2px); }
+  :where(.od-stat,.od-field,.od-cell) > :where(*) { display: block; }
+  .od-tile { display: grid; grid-template-rows: auto 1fr; }
+  :where(.od-tile) > :where(*) { display: block; }
+
+  /* media keeps its intrinsic ratio by default; never a distorted or cropped
+     cover by accident. height:auto lets the ratio win over an <img height="…">
+     attribute. Cropping to a uniform box is an explicit opt-in: set --od-ratio
+     AND add .od-media-cover together (per the core rule, only where a crop is
+     deliberate — tile thumbs, decorative fills — never on full-frame content). */
+  .od-media { display: block; width: 100%; height: auto; aspect-ratio: var(--od-ratio, auto); }
+  .od-media-cover { object-fit: cover; }
+
+  /* functional inline SVG icons opt into bounded geometry; content SVGs keep their own */
+  .od-icon { display: inline-block; inline-size: var(--od-icon-size, 1em); block-size: var(--od-icon-size, 1em); flex: none; }
+
+  /* data text only — authored copy is rewritten to its budget instead */
+  .od-truncate { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .od-clamp-2, .od-clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .od-clamp-2 { -webkit-line-clamp: 2; }
+  .od-clamp-3 { -webkit-line-clamp: 3; }
+  .od-lines-2 { min-height: calc(2 * 1.4em); }   /* block-level reservation for a shared baseline */
+  .od-nowrap  { white-space: nowrap; }           /* 数字+单位 · 价格+起 · 日期+星期 */
+  .od-keep    { word-break: keep-all; overflow-wrap: anywhere; } /* CJK labels break at spaces / <wbr> first */
+
+  /* screen skeleton (optional): bars take their own space, the middle scrolls — no padding guessed for chrome */
+  .od-screen { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+  .od-scroll { overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+
+  /* horizontal rail: the next item peeks at the edge; trailing room survives overflow */
+  .od-rail { display: flex; gap: var(--od-gap, 8px); overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none;
+             padding-inline: var(--od-rail-pad, 16px); scroll-padding-inline: var(--od-rail-pad, 16px); }
+  .od-rail::-webkit-scrollbar { display: none; }
+  :where(.od-rail) > :where(*) { flex: none; scroll-snap-align: start; }
+  :where(.od-rail) > :where(:last-child) { margin-inline-end: var(--od-rail-pad, 16px); }
+
+  .od-spacer { flex: none; visibility: hidden; pointer-events: none; }
+  .od-touch  { min-width: 44px; min-height: 44px; }
+}
+:root [hidden]:where(:not([hidden="until-found" i])) { display: none; }
+/* /OD-LAYOUT-PRIMITIVES v1 */
+:root{--paper:#f3f5f8;--white:#fff;--ink:#121b25;--muted:#4d5c70;--line:#cbd4e0;--signal:#004be4;--night:#111a27;--night-line:#36465c;--light:#f2f6fc;--soft:#b5c3d6;--spark:#9bbcff;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--display:"Avenir Next", "Helvetica Neue",sans-serif;--body:system-ui,sans-serif;--gutter:clamp(20px,5vw,80px)}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 var(--body)}a{color:inherit;text-underline-offset:.22em}a:focus-visible,summary:focus-visible{outline:3px solid var(--signal);outline-offset:4px}.wrap{width:min(100% - var(--gutter)*2,1280px);margin-inline:auto}.mast{border-bottom:1px solid var(--line)}.mast .wrap,.foot .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;padding-block:16px}.brand{display:flex;align-items:center;min-height:44px}.brand img{display:block;width:110px;height:auto}.nav{display:flex;flex-wrap:wrap;gap:8px clamp(12px,3vw,40px)}.nav a,.foot a{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;font:600 .76rem var(--mono)}.nav a:hover,.foot a:hover{text-decoration:underline}.hero{padding-block:clamp(64px,9vw,128px) clamp(40px,6vw,88px)}.hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.85fr);gap:clamp(32px,6vw,88px);align-items:end}.label{font:650 .75rem/1.5 var(--mono);text-transform:uppercase;letter-spacing:.12em;color:var(--signal);margin:0 0 20px}.label::before{content:"";display:inline-block;width:24px;border-top:3px solid currentColor;margin-inline-end:10px;vertical-align:middle}h1,h2,h3,p{margin-top:0}h1,h2,h3{font-family:var(--display);text-wrap:balance}h1{font-size:clamp(48px,7.8vw,116px);line-height:.94;letter-spacing:-.074em;margin-bottom:28px}h2{font-size:clamp(36px,5vw,68px);line-height:1;letter-spacing:-.055em;margin-bottom:24px}h3{font-size:1.28rem;line-height:1.25;margin-bottom:8px}.lede{font-size:clamp(17px,1.55vw,22px);max-width:42ch;color:var(--muted);margin-bottom:28px}.actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:8px 18px;font:650 .82rem var(--mono);text-decoration:none;border:1px solid var(--line);background:var(--white);color:var(--ink);border-radius:4px}.button.primary{background:var(--signal);border-color:var(--signal);color:var(--white)}.button:hover{text-decoration:underline}.terminal{margin:0;background:var(--night);color:var(--light);border:1px solid var(--night-line);border-radius:8px;min-width:0;box-shadow:0 16px 32px #111a2717}.terminal figcaption,.code-title{padding:14px 20px;border-bottom:1px solid var(--night-line);font:.75rem var(--mono);color:var(--soft)}.terminal figcaption::before{content:"";display:inline-block;width:8px;height:8px;background:var(--spark);border-radius:50%;margin-right:10px}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:clamp(.79rem,1.2vw,.93rem)/1.75 var(--mono);padding:20px}.signal{color:var(--spark)}.muted-code{color:var(--soft)}
+.rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-block:1px solid var(--line)}.rail article{padding:24px;min-width:0}.rail article:first-child{padding-inline-start:0}.rail article+article{border-inline-start:1px solid var(--line)}.rail strong{font:700 .8rem var(--mono);display:block;margin-bottom:8px}.rail p{margin:0;color:var(--muted)}.rail a{color:var(--signal)}.section{padding-block:clamp(64px,9vw,120px)}.split{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1fr);gap:clamp(24px,7vw,104px)}.copy{max-width:62ch}.copy p{margin-bottom:20px;color:var(--muted)}.copy p:last-child{margin-bottom:0}.statement{font:700 clamp(22px,3vw,36px)/1.2 var(--display);letter-spacing:-.03em}.dark{background:var(--night);color:var(--light)}.dark .label,.dark a{color:var(--spark)}.dark a:focus-visible{outline-color:var(--spark)}.dark p:not(.label){color:var(--soft)}.limits{margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 32px}.limits div{border-top:1px solid var(--night-line);padding-top:16px}.limits dt{font:700 1.1rem var(--display);margin-bottom:8px}.limits dd{margin:0;color:var(--soft)}.tools{margin:0;border-top:1px solid var(--line)}.tools div{display:grid;grid-template-columns:minmax(0,11rem) minmax(0,1fr);gap:16px;border-bottom:1px solid var(--line);padding:14px 0}.tools dt{color:var(--signal);overflow-wrap:anywhere}.tools dd{margin:0;color:var(--muted)}code{font-family:var(--mono);overflow-wrap:anywhere}.install{border-top:1px solid var(--line);background:var(--white)}.setup{display:grid;gap:16px}.setup p{margin:0;color:var(--muted)}details{border-top:1px solid var(--line);padding-top:8px}summary{cursor:pointer;display:list-item;padding:10px 0;font-weight:650}details p{padding-block:8px}.foot{border-top:1px solid var(--line)}.foot .meta{font:.76rem var(--mono);color:var(--muted)}
+@media(max-width:850px){.hero-grid,.split{grid-template-columns:1fr}.lede{max-width:50ch}}
+@media(max-width:540px){.rail,.limits,.tools div{grid-template-columns:1fr}.rail article,.rail article:first-child{padding:16px 0}.rail article+article{border-inline-start:0;border-top:1px solid var(--line)}.tools div{gap:4px}.mast .wrap{gap:4px 16px}}
+</style>
+</head>
+<body>
+<header class="mast">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="brand/wordmark-light.svg" width="96" height="32" alt="rayl home"></a>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="#limits">Limits</a><a href="#tools">Tools</a><a href="#install">Install</a><a href="https://github.com/oti-adjei/rayl">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+<main id="top">
+  <section class="wrap hero" aria-labelledby="title">
+    <div class="hero-grid">
+      <div>
+        <p class="label">An MCP server for Apple Mail</p>
+        <h1 id="title">The mail is<br>already here.</h1>
+        <p class="lede">Let your AI assistant search and read the mail on your Mac and save drafts in Apple Mail. rayl never contacts a mail service.</p>
+        <div class="actions"><a class="button primary" href="https://github.com/oti-adjei/rayl">View on GitHub ↗</a><a class="button" href="#install">Install rayl ↓</a></div>
+      </div>
+      <figure class="terminal">
+        <figcaption>Example · Finding an invoice</figcaption>
+        <pre><span class="signal">you</span>  Which Cloudflare invoice came
+     in this month?
+
+<span class="muted-code">→ search_mail(text: "invoice",
+    from: "cloudflare", days: 30)
+→ read_message(id: 72)</span>
+
+<span class="signal">rayl</span> IN-86687607, due 1 November 2026,
+     $0.00.</pre>
+      </figure>
+    </div>
+  </section>
+  <div class="wrap rail" aria-label="rayl at a glance">
+    <article><strong>Local to your Mac</strong><p>macOS only, verified with Apple Mail V10.</p></article>
+    <article><strong>Read access + drafts</strong><p>Drafts wait in Mail for you to review and send.</p></article>
+    <article><strong>Full Disk Access required</strong><p><a href="#limits">See what you’re granting.</a></p></article>
+  </div>
+  <section class="wrap section split" aria-labelledby="story-title">
+    <div><p class="label">Why rayl exists</p><h2 id="story-title">I got locked out of my own inbox.</h2></div>
+    <div class="copy">
+      <p>I connected an AI assistant to Gmail. It made more API calls than I realized. Google flagged the activity and locked me out. I appealed and eventually got my account back.</p>
+      <p>Apple Mail had already downloaded the messages I needed. I built rayl to read that local copy. Searches go straight to files on the Mac, so there’s no mail API quota for an assistant to burn through.</p>
+      <p class="statement">The mail was already here.</p>
+    </div>
+  </section>
+  <section class="section dark" id="limits" aria-labelledby="limits-title">
+    <div class="wrap split">
+      <div><p class="label">Permissions and limits</p><h2 id="limits-title">What it honestly can’t do yet.</h2><p>rayl runs locally and makes no network requests. Your MCP client receives the messages it asks for, so how that client handles them depends on its configuration.</p></div>
+      <dl class="limits">
+        <div><dt>Full Disk Access is a broad permission</dt><dd>Grant it to the app that launches rayl. macOS requires it to read Mail’s local files.</dd></div>
+        <div><dt>Drafts stop in Mail</dt><dd>Drafting requires Automation access to Mail.app and Mail running. Sending is deliberately absent. Existing messages can’t be deleted, flagged, moved, or modified.</dd></div>
+        <div><dt>Body search is linear and unindexed</dt><dd>Some messages have only headers on disk. In the author’s mailbox, that accounted for 37% of messages.</dd></div>
+        <div><dt>No cache or index on disk</dt><dd>rayl keeps no persistent cache or index. Drafts and attachments you explicitly save are written to disk.</dd></div>
+      </dl>
+    </div>
+  </section>
+  <section class="wrap section split" id="tools" aria-labelledby="tools-title">
+    <div><p class="label">MCP tools</p><h2 id="tools-title">Seven tools for Apple Mail.</h2></div>
+    <dl class="tools">
+      <div><dt><code>search_mail</code></dt><dd>Find messages by subject, sender, recipient, body text, mailbox, flags, or date.</dd></div>
+      <div><dt><code>read_message</code></dt><dd>Read a message’s headers and available body.</dd></div>
+      <div><dt><code>list_mailboxes</code></dt><dd>Find mailboxes and labels to filter by.</dd></div>
+      <div><dt><code>mail_status</code></dt><dd>See which accounts are loaded and what’s readable.</dd></div>
+      <div><dt><code>draft_message</code></dt><dd>Save a new draft to Mail’s Drafts folder.</dd></div>
+      <div><dt><code>draft_reply</code></dt><dd>Save a threaded reply draft.</dd></div>
+      <div><dt><code>save_attachment</code></dt><dd>List attachments or save them to files.</dd></div>
+    </dl>
+  </section>
+  <section class="section install" id="install" aria-labelledby="install-title">
+    <div class="wrap split">
+      <div><p class="label">Build from source</p><h2 id="install-title">Install rayl.</h2><p class="lede">A Rust binary for macOS. It speaks MCP over stdio and is released under the MIT license.</p></div>
+      <div class="setup">
+        <div class="terminal"><div class="code-title">Terminal</div><pre><code>git clone https://github.com/oti-adjei/rayl
+cd rayl
+cargo build --release
+./target/release/rayl doctor</code></pre></div>
+        <p>Once <code>doctor</code> reports <code>direct read path available</code>, register rayl with your client.</p>
+        <div class="terminal"><div class="code-title">Claude Code</div><pre><code>claude mcp add rayl --scope user -- "$PWD/target/release/rayl" serve</code></pre></div>
+        <details>
+          <summary>Configure Claude Desktop</summary>
+          <p>Add this entry to <code>claude_desktop_config.json</code> in <code>~/Library/Application Support/Claude/</code>. Replace the example path with the absolute path to your binary.</p>
+          <div class="terminal"><pre><code>{
+  "mcpServers": {
+    "rayl": {
+      "command": "/absolute/path/to/rayl/target/release/rayl",
+      "args": ["serve"]
+    }
+  }
+}</code></pre></div>
+        </details>
+        <p><a href="https://github.com/oti-adjei/rayl/blob/HEAD/docs/mcp.md">Full setup and troubleshooting ↗</a></p>
+      </div>
+    </div>
+  </section>
+</main>
+<footer class="foot"><div class="wrap"><a class="brand" href="#top"><img src="brand/wordmark-light.svg" width="96" height="32" alt="rayl home"></a><p class="meta">macOS · Rust · MIT</p><a href="https://github.com/oti-adjei/rayl">Source on GitHub ↗</a></div></footer>
+</body>
+</html>
