@@ -155,7 +155,7 @@
   <div class="wrap rail" aria-label="rayl at a glance">
     <article><strong>Local to your Mac</strong><p>macOS only, verified with Apple Mail V10.</p></article>
     <article><strong>Read access + drafts</strong><p>Drafts wait in Mail for you to review and send.</p></article>
-    <article><strong>Full Disk Access required</strong><p><a href="#limits">See what you’re granting.</a></p></article>
+    <article><strong>Choose your permissions</strong><p><a href="#limits">Full Disk Access for reading. Mail Automation for new drafts.</a></p></article>
   </div>
   <section class="wrap section split" aria-labelledby="story-title">
     <div><p class="label">Why rayl exists</p><h2 id="story-title">I got locked out of my own inbox.</h2></div>
@@ -169,8 +169,8 @@
     <div class="wrap split">
       <div><p class="label">Permissions and limits</p><h2 id="limits-title">What it honestly can’t do yet.</h2><p>rayl runs locally and makes no network requests. Your MCP client receives the messages it asks for, so how that client handles them depends on its configuration.</p></div>
       <dl class="limits">
-        <div><dt>Full Disk Access is a broad permission</dt><dd>Grant it to the app that launches rayl. macOS requires it to read Mail’s local files.</dd></div>
-        <div><dt>Drafts stop in Mail</dt><dd>Drafting requires Automation access to Mail.app and Mail running. Sending is deliberately absent. Existing messages can’t be deleted, flagged, moved, or modified.</dd></div>
+        <div><dt>Full Disk Access for reading mail</dt><dd>Grant it to the app that launches rayl to search, read, list mailboxes, or access attachments. Reply drafts use this access to find the original message and Mail Automation to create the draft.</dd></div>
+        <div><dt>New drafts use Mail Automation</dt><dd>For new drafts only, skip Full Disk Access. Open Mail.app and allow Automation when prompted. Drafts wait in Mail for you to review and send.</dd></div>
         <div><dt>Body search is linear and unindexed</dt><dd>Some messages have only headers on disk. In the author’s mailbox, that accounted for 37% of messages.</dd></div>
         <div><dt>No cache or index on disk</dt><dd>rayl keeps no persistent cache or index. Drafts and attachments you explicitly save are written to disk.</dd></div>
       </dl>
@@ -202,7 +202,7 @@
       <ul class="client-tags">
         <li>Claude Code</li><li>Claude Desktop</li><li>Cursor</li><li>VS Code</li><li>Windsurf</li><li>Zed</li><li>Codex</li><li>Gemini CLI</li><li>Cline</li><li>Goose</li><li>Continue</li><li>opencode</li>
       </ul>
-      <p>One caveat: macOS grants Full Disk Access to the app that launches rayl, so each client needs its own grant. <code>rayl doctor</code> names the exact application to approve.</p>
+      <p>For mail reading, give Full Disk Access to the app that launches rayl. Run <code>rayl doctor</code> from that client’s environment to check access.</p>
       <p><a href="https://github.com/oti-adjei/rayl/blob/HEAD/docs/clients.md">Exact setup for every client ↗</a></p>
     </div>
   </section>
@@ -212,20 +212,20 @@
       <div class="setup">
         <div class="terminal"><div class="code-title">Prebuilt binary · macOS universal</div><pre><code>curl -fsSL https://github.com/oti-adjei/rayl/releases/latest/download/rayl-macos-universal.tar.gz | tar -xz
 ./rayl doctor</code></pre></div>
-        <p>Or with a Rust toolchain: <code>cargo install rayl</code>, or clone and build.</p>
+        <p>With a Rust toolchain, you can also clone and build from source.</p>
         <div class="terminal"><div class="code-title">Build from source</div><pre><code>git clone https://github.com/oti-adjei/rayl
 cd rayl
 cargo build --release
 ./target/release/rayl doctor</code></pre></div>
-        <p>Once <code>doctor</code> reports <code>direct read path available</code>, register rayl with your client.</p>
-        <div class="terminal"><div class="code-title">Claude Code</div><pre><code>claude mcp add rayl --scope user -- "$PWD/target/release/rayl" serve</code></pre></div>
+        <p>Register rayl with your client using the absolute path to the binary. If you want to read mail, check that <code>doctor</code> reports <code>direct read path available</code>. For new drafts only, open Mail.app and allow Automation on first use.</p>
+        <div class="terminal"><div class="code-title">Claude Code</div><pre><code>claude mcp add rayl --scope user -- /absolute/path/to/rayl serve</code></pre></div>
         <details>
           <summary>Configure Claude Desktop</summary>
           <p>Add this entry to <code>claude_desktop_config.json</code> in <code>~/Library/Application Support/Claude/</code>. Replace the example path with the absolute path to your binary.</p>
           <div class="terminal"><pre><code>{
   "mcpServers": {
     "rayl": {
-      "command": "/absolute/path/to/rayl/target/release/rayl",
+      "command": "/absolute/path/to/rayl",
       "args": ["serve"]
     }
   }
@@ -244,7 +244,7 @@ cargo build --release
           <div><span class="tag">done</span><p><strong>Drafting.</strong> New drafts and threaded replies via Mail.app.</p></div>
           <div><span class="tag">done</span><p><strong>Body search, attachments, recipients, threads.</strong></p></div>
           <div><span class="tag next">next</span><p><strong>Indexed body search.</strong> An index, so body search scales past a few thousand messages.</p></div>
-          <div><span class="tag">planned</span><p><strong>Script source.</strong> Modes that need no Full Disk Access, only Automation of Mail.</p></div>
+          <div><span class="tag">planned</span><p><strong>Read through Mail Automation.</strong> Planned read modes using Automation permission scoped to Mail.app.</p></div>
           <div><span class="tag">planned</span><p><strong>HTTP transport.</strong> Reach your Mac&rsquo;s mail from elsewhere.</p></div>
         </div>
       </div>

@@ -30,8 +30,9 @@ send mail, cannot delete or modify existing messages, and never touches the netw
 
 ## Limits, stated honestly
 
-- Reading requires Full Disk Access granted to the app that launches rayl; drafting
-  additionally needs Automation access to Mail.app, with Mail running.
+- Search, reading, mailbox listing, attachments, and reply drafts use Full Disk Access
+  granted to the app that launches rayl. New drafts can use Mail Automation alone.
+  Both draft tools require Mail.app to be running.
 - Body search is linear and unindexed; messages Mail stores as headers-only cannot be
   searched (37% of messages on the author's own store).
 - rayl persists nothing between requests in the current mode.
@@ -39,7 +40,7 @@ send mail, cannot delete or modify existing messages, and never touches the netw
 ## Roadmap
 
 - Indexed body search — an index so body search scales past a few thousand messages (next)
-- Script source — modes needing no Full Disk Access, only Automation of Mail (planned)
+- Script source — planned read modes using Automation permission scoped to Mail.app.
 - HTTP transport — reach the Mac's mail from elsewhere (planned)
 
 ## Docs
