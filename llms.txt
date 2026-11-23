@@ -36,7 +36,14 @@ send mail, cannot delete or modify existing messages, and never touches the netw
   searched (37% of messages on the author's own store).
 - rayl persists nothing between requests in the current mode.
 
+## Roadmap
+
+- Indexed body search — an index so body search scales past a few thousand messages (next)
+- Script source — modes needing no Full Disk Access, only Automation of Mail (planned)
+- HTTP transport — reach the Mac's mail from elsewhere (planned)
+
 ## Docs
 
 - README: https://github.com/oti-adjei/rayl#readme
 - MCP setup and every tool parameter: https://github.com/oti-adjei/rayl/blob/main/docs/mcp.md
+- Client setup (Cursor, VS Code, Codex, Zed, Gemini CLI and more): https://github.com/oti-adjei/rayl/blob/main/docs/clients.md

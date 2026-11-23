@@ -108,6 +108,14 @@
 :root{--paper:#f3f5f8;--white:#fff;--ink:#121b25;--muted:#4d5c70;--line:#cbd4e0;--signal:#004be4;--night:#111a27;--night-line:#36465c;--light:#f2f6fc;--soft:#b5c3d6;--spark:#9bbcff;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--display:"Avenir Next", "Helvetica Neue",sans-serif;--body:system-ui,sans-serif;--gutter:clamp(20px,5vw,80px)}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 var(--body)}a{color:inherit;text-underline-offset:.22em}a:focus-visible,summary:focus-visible{outline:3px solid var(--signal);outline-offset:4px}.wrap{width:min(100% - var(--gutter)*2,1280px);margin-inline:auto}.mast{border-bottom:1px solid var(--line)}.mast .wrap,.foot .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 24px;padding-block:16px}.brand{display:flex;align-items:center;min-height:44px}.brand img{display:block;width:110px;height:auto}.nav{display:flex;flex-wrap:wrap;gap:8px clamp(12px,3vw,40px)}.nav a,.foot a{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;font:600 .76rem var(--mono)}.nav a:hover,.foot a:hover{text-decoration:underline}.hero{padding-block:clamp(64px,9vw,128px) clamp(40px,6vw,88px)}.hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.85fr);gap:clamp(32px,6vw,88px);align-items:end}.label{font:650 .75rem/1.5 var(--mono);text-transform:uppercase;letter-spacing:.12em;color:var(--signal);margin:0 0 20px}.label::before{content:"";display:inline-block;width:24px;border-top:3px solid currentColor;margin-inline-end:10px;vertical-align:middle}h1,h2,h3,p{margin-top:0}h1,h2,h3{font-family:var(--display);text-wrap:balance}h1{font-size:clamp(48px,7.8vw,116px);line-height:.94;letter-spacing:-.074em;margin-bottom:28px}h2{font-size:clamp(36px,5vw,68px);line-height:1;letter-spacing:-.055em;margin-bottom:24px}h3{font-size:1.28rem;line-height:1.25;margin-bottom:8px}.lede{font-size:clamp(17px,1.55vw,22px);max-width:42ch;color:var(--muted);margin-bottom:28px}.actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:8px 18px;font:650 .82rem var(--mono);text-decoration:none;border:1px solid var(--line);background:var(--white);color:var(--ink);border-radius:4px}.button.primary{background:var(--signal);border-color:var(--signal);color:var(--white)}.button:hover{text-decoration:underline}.terminal{margin:0;background:var(--night);color:var(--light);border:1px solid var(--night-line);border-radius:8px;min-width:0;box-shadow:0 16px 32px #111a2717}.terminal figcaption,.code-title{padding:14px 20px;border-bottom:1px solid var(--night-line);font:.75rem var(--mono);color:var(--soft)}.terminal figcaption::before{content:"";display:inline-block;width:8px;height:8px;background:var(--spark);border-radius:50%;margin-right:10px}pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:clamp(.79rem,1.2vw,.93rem)/1.75 var(--mono);padding:20px}.signal{color:var(--spark)}.muted-code{color:var(--soft)}
 .rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-block:1px solid var(--line)}.rail article{padding:24px;min-width:0}.rail article:first-child{padding-inline-start:0}.rail article+article{border-inline-start:1px solid var(--line)}.rail strong{font:700 .8rem var(--mono);display:block;margin-bottom:8px}.rail p{margin:0;color:var(--muted)}.rail a{color:var(--signal)}.section{padding-block:clamp(64px,9vw,120px)}.split{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1fr);gap:clamp(24px,7vw,104px)}.copy{max-width:62ch}.copy p{margin-bottom:20px;color:var(--muted)}.copy p:last-child{margin-bottom:0}.statement{font:700 clamp(22px,3vw,36px)/1.2 var(--display);letter-spacing:-.03em}.dark{background:var(--night);color:var(--light)}.dark .label,.dark a{color:var(--spark)}.dark a:focus-visible{outline-color:var(--spark)}.dark p:not(.label){color:var(--soft)}.limits{margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 32px}.limits div{border-top:1px solid var(--night-line);padding-top:16px}.limits dt{font:700 1.1rem var(--display);margin-bottom:8px}.limits dd{margin:0;color:var(--soft)}.tools{margin:0;border-top:1px solid var(--line)}.tools div{display:grid;grid-template-columns:minmax(0,11rem) minmax(0,1fr);gap:16px;border-bottom:1px solid var(--line);padding:14px 0}.tools dt{color:var(--signal);overflow-wrap:anywhere}.tools dd{margin:0;color:var(--muted)}code{font-family:var(--mono);overflow-wrap:anywhere}.install{border-top:1px solid var(--line);background:var(--white)}.setup{display:grid;gap:16px}.setup p{margin:0;color:var(--muted)}details{border-top:1px solid var(--line);padding-top:8px}summary{cursor:pointer;display:list-item;padding:10px 0;font-weight:650}details p{padding-block:8px}.foot{border-top:1px solid var(--line)}.foot .meta{font:.76rem var(--mono);color:var(--muted)}
+.client-tags{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0;padding:0;list-style:none}
+.client-tags li{font:600 .76rem var(--mono);padding:6px 12px;border:1px solid var(--line);border-radius:4px;background:var(--white);color:var(--muted)}
+.roadmap{margin:0;border-top:1px solid var(--line)}
+.roadmap>div{display:flex;align-items:baseline;gap:16px;padding:14px 0;border-bottom:1px solid var(--line)}
+.tag{flex:none;font:700 .68rem var(--mono);text-transform:uppercase;letter-spacing:.08em;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
+.tag.next{color:var(--signal);border-color:var(--signal)}
+.roadmap p{margin:0;color:var(--muted)}
+.roadmap p strong{color:var(--ink);font-family:var(--display)}
 @media(max-width:850px){.hero-grid,.split{grid-template-columns:1fr}.lede{max-width:50ch}}
 @media(max-width:540px){.rail,.limits,.tools div{grid-template-columns:1fr}.rail article,.rail article:first-child{padding:16px 0}.rail article+article{border-inline-start:0;border-top:1px solid var(--line)}.tools div{gap:4px}.mast .wrap{gap:4px 16px}}
 </style>
@@ -117,7 +125,7 @@
   <div class="wrap">
     <a class="brand" href="#top"><img src="brand/wordmark-light.svg" width="96" height="32" alt="rayl home"></a>
     <nav class="nav" aria-label="Main navigation">
-      <a href="#limits">Limits</a><a href="#tools">Tools</a><a href="#install">Install</a><a href="https://github.com/oti-adjei/rayl">GitHub ↗</a>
+      <a href="#limits">Limits</a><a href="#tools">Tools</a><a href="#clients">Clients</a><a href="#install">Install</a><a href="#roadmap">Roadmap</a><a href="https://github.com/oti-adjei/rayl">GitHub ↗</a>
     </nav>
   </div>
 </header>
@@ -180,11 +188,32 @@
       <div><dt><code>save_attachment</code></dt><dd>List attachments or save them to files.</dd></div>
     </dl>
   </section>
+  <section class="wrap section split" id="clients" aria-labelledby="clients-title">
+    <div><p class="label">Clients</p><h2 id="clients-title">Bring your own agent.</h2><p class="lede">rayl speaks the Model Context Protocol over stdio, so anything MCP-compatible can drive it. No client-specific code, no lock-in.</p></div>
+    <div class="copy">
+      <div class="terminal"><div class="code-title">The common config · most clients</div><pre><code>{
+  "mcpServers": {
+    "rayl": {
+      "command": "/absolute/path/to/rayl",
+      "args": ["serve"]
+    }
+  }
+}</code></pre></div>
+      <ul class="client-tags">
+        <li>Claude Code</li><li>Claude Desktop</li><li>Cursor</li><li>VS Code</li><li>Windsurf</li><li>Zed</li><li>Codex</li><li>Gemini CLI</li><li>Cline</li><li>Goose</li><li>Continue</li><li>opencode</li>
+      </ul>
+      <p>One caveat: macOS grants Full Disk Access to the app that launches rayl, so each client needs its own grant. <code>rayl doctor</code> names the exact application to approve.</p>
+      <p><a href="https://github.com/oti-adjei/rayl/blob/HEAD/docs/clients.md">Exact setup for every client ↗</a></p>
+    </div>
+  </section>
   <section class="section install" id="install" aria-labelledby="install-title">
     <div class="wrap split">
-      <div><p class="label">Build from source</p><h2 id="install-title">Install rayl.</h2><p class="lede">A Rust binary for macOS. It speaks MCP over stdio and is released under the MIT license.</p></div>
+      <div><p class="label">Install</p><h2 id="install-title">Install rayl.</h2><p class="lede">A Rust binary for macOS. It speaks MCP over stdio and is released under the MIT license.</p></div>
       <div class="setup">
-        <div class="terminal"><div class="code-title">Terminal</div><pre><code>git clone https://github.com/oti-adjei/rayl
+        <div class="terminal"><div class="code-title">Prebuilt binary · macOS universal</div><pre><code>curl -fsSL https://github.com/oti-adjei/rayl/releases/latest/download/rayl-macos-universal.tar.gz | tar -xz
+./rayl doctor</code></pre></div>
+        <p>Or with a Rust toolchain: <code>cargo install rayl</code>, or clone and build.</p>
+        <div class="terminal"><div class="code-title">Build from source</div><pre><code>git clone https://github.com/oti-adjei/rayl
 cd rayl
 cargo build --release
 ./target/release/rayl doctor</code></pre></div>
@@ -203,6 +232,21 @@ cargo build --release
 }</code></pre></div>
         </details>
         <p><a href="https://github.com/oti-adjei/rayl/blob/HEAD/docs/mcp.md">Full setup and troubleshooting ↗</a></p>
+      </div>
+    </div>
+  </section>
+  <section class="section" id="roadmap" aria-labelledby="roadmap-title">
+    <div class="wrap split">
+      <div><p class="label">Roadmap</p><h2 id="roadmap-title">Where rayl is going.</h2><p class="lede">Stated plainly, so you know what you&rsquo;re adopting.</p></div>
+      <div class="copy">
+        <div class="roadmap">
+          <div><span class="tag">done</span><p><strong>direct+live.</strong> Search, read, MCP server — working end to end.</p></div>
+          <div><span class="tag">done</span><p><strong>Drafting.</strong> New drafts and threaded replies via Mail.app.</p></div>
+          <div><span class="tag">done</span><p><strong>Body search, attachments, recipients, threads.</strong></p></div>
+          <div><span class="tag next">next</span><p><strong>Indexed body search.</strong> An index, so body search scales past a few thousand messages.</p></div>
+          <div><span class="tag">planned</span><p><strong>Script source.</strong> Modes that need no Full Disk Access, only Automation of Mail.</p></div>
+          <div><span class="tag">planned</span><p><strong>HTTP transport.</strong> Reach your Mac&rsquo;s mail from elsewhere.</p></div>
+        </div>
       </div>
     </div>
   </section>
