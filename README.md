@@ -75,23 +75,10 @@ cargo build --release
 Or grab a prebuilt universal binary — no Rust toolchain needed:
 
 ```bash
-(
-  set -e
-  workdir="$(mktemp -d)"
-  trap 'rm -rf "$workdir"' EXIT
-  cd "$workdir"
-  release=https://github.com/oti-adjei/rayl/releases/latest/download
-  archive=rayl-macos-universal.tar.gz
-  curl -fLO "$release/$archive"
-  curl -fLO "$release/$archive.sha256"
-  shasum -a 256 -c "$archive.sha256"
-  tar -xzf "$archive"
-  mkdir -p "$HOME/.local/bin"
-  install -m 755 rayl "$HOME/.local/bin/rayl"
-) && "$HOME/.local/bin/rayl" doctor
+installer="$(curl -fsSL https://raw.githubusercontent.com/oti-adjei/rayl/main/install.sh)" && sh -c "$installer"
 ```
 
-`doctor` checks whether rayl can read Apple Mail. For search, reading, mailbox listing,
+After installing, run `"$HOME/.local/bin/rayl" doctor`. It checks whether rayl can read Apple Mail. For search, reading, mailbox listing,
 attachments, and reply drafts, look for `direct read path available`. You can skip Full Disk
 Access if you only want to create new drafts. Open Mail.app and allow Automation when prompted.
 
