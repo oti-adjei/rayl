@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +20,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build both architectures
-        run: cargo build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
+        run: cargo build --locked --release --target aarch64-apple-darwin --target x86_64-apple-darwin
 
       - name: Assemble universal binary
         run: |
@@ -29,6 +29,7 @@ jobs:
             target/aarch64-apple-darwin/release/rayl \
             target/x86_64-apple-darwin/release/rayl \
             -output dist/rayl
+          lipo -verify_arch arm64 x86_64 dist/rayl
           chmod +x dist/rayl
           cd dist
           tar -czf rayl-macos-universal.tar.gz rayl
