@@ -210,20 +210,8 @@
     <div class="wrap split">
       <div><p class="label">Install</p><h2 id="install-title">Install rayl.</h2><p class="lede">A Rust binary for macOS. It speaks MCP over stdio and is released under the MIT license.</p></div>
       <div class="setup">
-        <div class="terminal"><div class="code-title">Prebuilt binary · macOS universal</div><pre><code>(
-  set -e
-  workdir="$(mktemp -d)"
-  trap 'rm -rf "$workdir"' EXIT
-  cd "$workdir"
-  release=https://github.com/oti-adjei/rayl/releases/latest/download
-  archive=rayl-macos-universal.tar.gz
-  curl -fLO "$release/$archive"
-  curl -fLO "$release/$archive.sha256"
-  shasum -a 256 -c "$archive.sha256"
-  tar -xzf "$archive"
-  mkdir -p "$HOME/.local/bin"
-  install -m 755 rayl "$HOME/.local/bin/rayl"
-) &amp;&amp; "$HOME/.local/bin/rayl" doctor</code></pre></div>
+        <div class="terminal"><div class="code-title">Prebuilt binary · macOS universal</div><pre><code>installer="$(curl -fsSL https://raw.githubusercontent.com/oti-adjei/rayl/main/install.sh)" &amp;&amp; sh -c "$installer"</code></pre></div>
+        <p>The installer verifies the release checksum and puts rayl in <code>~/.local/bin</code>. Run <code>~/.local/bin/rayl doctor</code> after installing.</p>
         <p>With a Rust toolchain, you can also clone and build from source.</p>
         <div class="terminal"><div class="code-title">Build from source</div><pre><code>git clone https://github.com/oti-adjei/rayl
 cd rayl
